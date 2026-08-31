@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useUploads } from '../lib/managers';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectInfo } from '@videovault/shared';
 import { api } from '../lib/api';
@@ -26,6 +27,15 @@ export default function LibraryPage() {
       .catch(() => setNotice('Could not load projects — check your connection.'));
   }, []);
   useEffect(load, [load]);
+
+  // Keep counts fresh while uploads finish in the background.
+  const uploads = useUploads();
+  const doneCount = uploads.filter((u) => u.state === 'done').length;
+  const prevDone = useRef(doneCount);
+  useEffect(() => {
+    if (doneCount > prevDone.current) load();
+    prevDone.current = doneCount;
+  }, [doneCount, load]);
 
   return (
     <Layout title="Library">

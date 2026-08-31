@@ -174,3 +174,40 @@ describe('videos', () => {
     expect(t.r2.multiparts.size).toBe(0);
   });
 });
+
+describe('counts', () => {
+  it('project and folder counts include uploading and ready videos', async () => {
+    const t = await createTestApp();
+    const admin = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+    const folderRes = await t.app.request(`/api/projects/${projectId}/folders`, post({ name: 'Camera' }, admin));
+    const { folder } = (await folderRes.json()) as { folder: FolderInfo };
+
+    // 3 registered (still uploading) in the folder + 1 READY at project root.
+    const batch = await t.app.request(
+      '/api/uploads/create-batch',
+      post(
+        {
+          projectId,
+          folderId: folder.id,
+          files: [1, 2, 3].map((i) => ({ filename: `c${i}.mp4`, size: 1000, mimeType: 'video/mp4' })),
+        },
+        admin,
+      ),
+    );
+    expect(batch.status).toBe(201);
+    await readyVideo(t, admin, projectId);
+
+    const projects = (await (await t.app.request('/api/projects', { headers: { cookie: admin } })).json()) as {
+      projects: ProjectInfo[];
+    };
+    const p = projects.projects.find((x) => x.id === projectId)!;
+    expect(p.videoCount).toBe(4);
+    expect(p.folderCount).toBe(1);
+
+    const folders = (await (await t.app.request(`/api/projects/${projectId}/folders`, { headers: { cookie: admin } })).json()) as {
+      folders: FolderInfo[];
+    };
+    expect(folders.folders[0]!.videoCount).toBe(3);
+  });
+});

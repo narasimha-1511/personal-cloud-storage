@@ -41,11 +41,15 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
   const app = new Hono<{ Variables: AuthVariables }>();
 
   app.get('/', async (c) => {
+    // NOTE: the correlated references must be written as literal
+    // `projects.id` — interpolating the drizzle column renders an
+    // unqualified "id" which the subquery resolves against ITS OWN table,
+    // silently making every count zero.
     const rows = await db
       .select({
         project: projects,
-        videoCount: sql<number>`(SELECT COUNT(*) FROM videos v WHERE v.project_id = ${projects.id} AND v.status != 'ABORTED')`,
-        folderCount: sql<number>`(SELECT COUNT(*) FROM folders f WHERE f.project_id = ${projects.id})`,
+        videoCount: sql<number>`(SELECT COUNT(*) FROM videos v WHERE v.project_id = projects.id AND v.status != 'ABORTED')`,
+        folderCount: sql<number>`(SELECT COUNT(*) FROM folders f WHERE f.project_id = projects.id)`,
       })
       .from(projects)
       .orderBy(projects.createdAt);
@@ -114,7 +118,8 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
     const rows = await db
       .select({
         folder: folders,
-        videoCount: sql<number>`(SELECT COUNT(*) FROM videos v WHERE v.folder_id = ${folders.id} AND v.status != 'ABORTED')`,
+        // Literal `folders.id` on purpose — see the note in the project list.
+        videoCount: sql<number>`(SELECT COUNT(*) FROM videos v WHERE v.folder_id = folders.id AND v.status != 'ABORTED')`,
       })
       .from(folders)
       .where(eq(folders.projectId, projectId))

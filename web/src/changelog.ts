@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.7.1',
+    date: '2026-08-31',
+    title: 'Correct video counts',
+    changes: [
+      'Fixed: projects and folders always showed “0 videos” even when full',
+      'Counts refresh live as uploads finish',
+      '“Clear all” button for the finished-transfers list',
+    ],
+  },
+  {
     version: '1.7.0',
     date: '2026-08-31',
     title: 'Update on demand',

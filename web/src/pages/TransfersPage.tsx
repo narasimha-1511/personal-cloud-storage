@@ -89,7 +89,17 @@ export default function TransfersPage() {
 
         {finishedUploads.length > 0 && (
           <section>
-            <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Finished</h2>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+                Finished ({finishedUploads.length})
+              </h2>
+              <button
+                onClick={() => void uploadManager.removeFinished()}
+                className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100"
+              >
+                Clear all
+              </button>
+            </div>
             <div className="space-y-2">
               <LazyList
                 items={finishedUploads}

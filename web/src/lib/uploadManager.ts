@@ -350,6 +350,21 @@ export class UploadManager {
     await this.setUpload(localId, { state: 'aborted' });
   }
 
+  /** Clears all finished/cancelled uploads from the list in one go. */
+  async removeFinished(): Promise<void> {
+    const gone = [...this.uploadsCache.values()].filter(
+      (u) => u.state === 'done' || u.state === 'aborted',
+    );
+    for (const u of gone) {
+      await this.db.parts.where('localId').equals(u.localId).delete();
+      await this.db.uploads.delete(u.localId);
+      this.uploadsCache.delete(u.localId);
+      this.partsDoneCache.delete(u.localId);
+      this.files.delete(u.localId);
+    }
+    this.emit();
+  }
+
   async remove(localId: string): Promise<void> {
     await this.db.parts.where('localId').equals(localId).delete();
     await this.db.uploads.delete(localId);
