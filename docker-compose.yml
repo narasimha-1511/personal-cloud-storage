@@ -1,0 +1,44 @@
+# Local production-parity run: the app container + MinIO standing in for R2.
+# For real deployment (Coolify + Cloudflare R2) see README.md.
+services:
+  app:
+    build: .
+    ports:
+      - '8787:8787'
+    environment:
+      DATABASE_PATH: /data/videovault.db
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: change-me-now
+      SESSION_SECRET: local-dev-secret-change-me-0123456789
+      S3_ENDPOINT: http://minio:9000
+      R2_ACCESS_KEY_ID: minioadmin
+      R2_SECRET_ACCESS_KEY: minioadmin
+      R2_BUCKET: video-vault
+      NODE_ENV: development
+    volumes:
+      - app-data:/data
+    depends_on:
+      minio-setup:
+        condition: service_completed_successfully
+
+  minio:
+    image: minio/minio
+    command: server /data
+    ports:
+      - '9000:9000'
+    volumes:
+      - minio-data:/data
+
+  minio-setup:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb --ignore-existing local/video-vault;
+      "
+
+volumes:
+  app-data:
+  minio-data:

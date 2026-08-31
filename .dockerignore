@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/dist
+**/dev-dist
+**/data
+**/*.db
+**/*.db-*
+.env
+**/.env
+.git
+Dockerfile
+docker-compose.yml
