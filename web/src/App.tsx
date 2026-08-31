@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth';
 import UpdateToast from './components/UpdateToast';
+import { WhatsNewAutoPrompt } from './components/WhatsNew';
 import LoginPage from './pages/LoginPage';
 import LibraryPage from './pages/LibraryPage';
 import ProjectPage from './pages/ProjectPage';
@@ -34,6 +35,7 @@ export default function App() {
   return (
     <AuthProvider>
       <UpdateToast />
+      <WhatsNewAutoPrompt />
       <Shell />
     </AuthProvider>
   );

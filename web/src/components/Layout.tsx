@@ -3,7 +3,9 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { useDownloads, useUploads } from '../lib/managers';
 import { Sheet, SheetAction } from './ui';
-import { IconChevronLeft, IconLibrary, IconLogo, IconLogout, IconTransfers, IconUsers } from './icons';
+import { IconChevronLeft, IconLibrary, IconLogo, IconLogout, IconSparkle, IconTransfers, IconUsers } from './icons';
+import { WhatsNewSheet } from './WhatsNew';
+import { APP_VERSION } from '../changelog';
 
 const ACTIVE_UPLOAD_STATES = ['queued', 'uploading', 'completing', 'waiting_network', 'paused', 'needs_file'];
 const ACTIVE_DOWNLOAD_STATES = ['downloading', 'paused', 'waiting_network'];
@@ -12,6 +14,7 @@ export default function Layout({ children, title, back }: { children: ReactNode;
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const uploads = useUploads();
   const downloads = useDownloads();
   const activeCount =
@@ -77,9 +80,20 @@ export default function Layout({ children, title, back }: { children: ReactNode;
               }}
             />
           )}
+          <SheetAction
+            icon={<IconSparkle size={18} />}
+            label="What's new"
+            sub={`Version ${APP_VERSION}`}
+            onClick={() => {
+              setMenuOpen(false);
+              setWhatsNewOpen(true);
+            }}
+          />
           <SheetAction icon={<IconLogout size={18} />} label="Sign out" onClick={() => void logout()} />
         </div>
       </Sheet>
+
+      <WhatsNewSheet open={whatsNewOpen} onClose={() => setWhatsNewOpen(false)} />
     </div>
   );
 }
