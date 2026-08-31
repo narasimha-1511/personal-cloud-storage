@@ -53,6 +53,11 @@ export function createR2Client(env: Env): R2Client | null {
     },
     // MinIO in local dev needs path-style addressing.
     forcePathStyle: Boolean(env.S3_ENDPOINT),
+    // Without these, newer AWS SDKs bake an x-amz-checksum-crc32 of an EMPTY
+    // body into presigned UploadPart URLs, and R2 then rejects the browser's
+    // real bytes. The multipart complete step verifies integrity instead.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 
   return {
