@@ -14,6 +14,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.7.0',
+    date: '2026-08-31',
+    title: 'Update on demand',
+    changes: [
+      '“Check for updates” in the account menu fetches the newest version immediately',
+      'Tells you when you are already on the latest build',
+    ],
+  },
+  {
     version: '1.6.0',
     date: '2026-08-31',
     title: 'Fast with huge libraries',

@@ -3,8 +3,9 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { uploadManager, useDownloads, useUploads } from '../lib/managers';
 import { syncWakeLock } from '../lib/wakeLock';
+import { checkForUpdates } from '../lib/swUpdate';
 import { Sheet, SheetAction } from './ui';
-import { IconChevronLeft, IconLibrary, IconLogo, IconLogout, IconSparkle, IconTransfers, IconUsers } from './icons';
+import { IconChevronLeft, IconDownload, IconLibrary, IconLogo, IconLogout, IconSparkle, IconTransfers, IconUsers } from './icons';
 import { WhatsNewSheet } from './WhatsNew';
 import { APP_VERSION } from '../changelog';
 
@@ -16,6 +17,7 @@ export default function Layout({ children, title, back }: { children: ReactNode;
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+  const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'none' | 'unsupported'>('idle');
   const uploads = useUploads();
   const downloads = useDownloads();
   const activeCount =
@@ -178,6 +180,32 @@ export default function Layout({ children, title, back }: { children: ReactNode;
             onClick={() => {
               setMenuOpen(false);
               setWhatsNewOpen(true);
+            }}
+          />
+          <SheetAction
+            icon={<IconDownload size={18} />}
+            label="Check for updates"
+            sub={
+              updateState === 'checking'
+                ? 'Checking…'
+                : updateState === 'none'
+                  ? "You're on the latest version"
+                  : updateState === 'unsupported'
+                    ? 'Available in the installed app'
+                    : 'Fetch the newest version now'
+            }
+            onClick={async () => {
+              if (updateState === 'checking') return;
+              setUpdateState('checking');
+              const result = await checkForUpdates();
+              if (result === 'found') {
+                // The "New version available — Reload" toast takes over.
+                setUpdateState('idle');
+                setMenuOpen(false);
+              } else {
+                setUpdateState(result === 'none' ? 'none' : 'unsupported');
+                setTimeout(() => setUpdateState('idle'), 4000);
+              }
             }}
           />
           <SheetAction icon={<IconLogout size={18} />} label="Sign out" onClick={() => void logout()} />

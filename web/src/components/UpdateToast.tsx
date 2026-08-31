@@ -1,4 +1,5 @@
 import { useRegisterSW } from 'virtual:pwa-register/react';
+import { setSwRegistration } from '../lib/swUpdate';
 
 /**
  * Shows a reload button when a new deploy is available. Checks on every
@@ -13,6 +14,7 @@ export default function UpdateToast() {
   } = useRegisterSW({
     onRegisteredSW(_url, registration) {
       if (registration) {
+        setSwRegistration(registration);
         setInterval(() => void registration.update(), 15 * 60 * 1000);
       }
     },
