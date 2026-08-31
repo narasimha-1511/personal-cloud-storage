@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.5.0',
+    date: '2026-08-31',
+    title: 'Reload protection',
+    changes: [
+      'One-tap “Re-select all” banner re-attaches every interrupted upload — pick all files in one go',
+      'The browser now warns before reloading or closing while uploads are running',
+      'The screen stays awake while transfers are active',
+    ],
+  },
+  {
     version: '1.4.0',
     date: '2026-08-31',
     title: 'Versioning & smoother updates',

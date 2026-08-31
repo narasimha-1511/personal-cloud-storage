@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
-import { useDownloads, useUploads } from '../lib/managers';
+import { uploadManager, useDownloads, useUploads } from '../lib/managers';
+import { syncWakeLock } from '../lib/wakeLock';
 import { Sheet, SheetAction } from './ui';
 import { IconChevronLeft, IconLibrary, IconLogo, IconLogout, IconSparkle, IconTransfers, IconUsers } from './icons';
 import { WhatsNewSheet } from './WhatsNew';
@@ -20,6 +21,65 @@ export default function Layout({ children, title, back }: { children: ReactNode;
   const activeCount =
     uploads.filter((u) => ACTIVE_UPLOAD_STATES.includes(u.state)).length +
     downloads.filter((d) => ACTIVE_DOWNLOAD_STATES.includes(d.state)).length;
+
+  // ---- transfer protections ----
+  const transferring =
+    uploads.some((u) => u.state === 'uploading' || u.state === 'completing' || u.state === 'queued') ||
+    downloads.some((d) => d.state === 'downloading');
+
+  // Keep the screen awake while bytes are moving.
+  useEffect(() => {
+    syncWakeLock(transferring);
+    return () => syncWakeLock(false);
+  }, [transferring]);
+
+  // Warn before an accidental reload/close while transfers are running.
+  useEffect(() => {
+    if (!transferring) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [transferring]);
+
+  // ---- bulk file re-attach after a reload ----
+  const needsFile = uploads.filter((u) => u.state === 'needs_file');
+  const resumeInput = useRef<HTMLInputElement>(null);
+  const [resumeMsg, setResumeMsg] = useState<string | null>(null);
+
+  async function onResumeAllPick(files: FileList) {
+    const pending = [...needsFile];
+    const used = new Set<string>();
+    let ok = 0;
+    let miss = 0;
+    for (const file of Array.from(files)) {
+      const target = pending.find(
+        (u) =>
+          !used.has(u.localId) &&
+          u.filename === file.name &&
+          u.size === file.size,
+      );
+      if (!target) {
+        miss++;
+        continue;
+      }
+      try {
+        await uploadManager.provideFile(target.localId, file);
+        used.add(target.localId);
+        ok++;
+      } catch {
+        miss++;
+      }
+    }
+    setResumeMsg(
+      ok > 0
+        ? `${ok} upload${ok === 1 ? '' : 's'} resumed${miss > 0 ? ` — ${miss} file${miss === 1 ? '' : 's'} didn't match` : ''}`
+        : 'None of the picked files matched — select the exact original videos.',
+    );
+    setTimeout(() => setResumeMsg(null), 5000);
+  }
 
   return (
     <div className="flex min-h-dvh flex-col bg-[#0a0a0c] text-zinc-100">
@@ -49,7 +109,38 @@ export default function Layout({ children, title, back }: { children: ReactNode;
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-lg flex-1 px-4 pb-28 pt-4">{children}</main>
+      <main className="mx-auto w-full max-w-lg flex-1 px-4 pb-28 pt-4">
+        {needsFile.length > 0 && (
+          <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-4">
+            <p className="text-[13px] font-semibold text-amber-200">
+              {needsFile.length} upload{needsFile.length === 1 ? ' is' : 's are'} waiting for {needsFile.length === 1 ? 'its file' : 'their files'}
+            </p>
+            <p className="mt-1 text-[12px] leading-relaxed text-amber-200/70">
+              The page was reloaded, so the app needs the files again. Select them all in one go — nothing
+              already uploaded is sent twice.
+            </p>
+            <button
+              onClick={() => resumeInput.current?.click()}
+              className="mt-3 h-9 rounded-lg bg-amber-500 px-4 text-[13px] font-semibold text-black transition-colors hover:bg-amber-400"
+            >
+              Re-select {needsFile.length === 1 ? 'the file' : `all ${needsFile.length} files`}
+            </button>
+            {resumeMsg && <p className="mt-2 text-[12px] text-amber-200">{resumeMsg}</p>}
+          </div>
+        )}
+        <input
+          ref={resumeInput}
+          type="file"
+          accept="video/*,.mp4,.mov,.mts,.mxf,.braw,.r3d"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) void onResumeAllPick(e.target.files);
+            e.target.value = '';
+          }}
+        />
+        {children}
+      </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-[#0e0e11]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
         <div className="mx-auto flex max-w-lg items-stretch">
