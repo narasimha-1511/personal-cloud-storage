@@ -19,6 +19,7 @@ import { buildObjectKey } from '../keys.js';
 import type { AuthVariables } from '../auth/middleware.js';
 import type { Env } from '../env.js';
 import { log, logged } from '../log.js';
+import { canSeeFolder } from '../access.js';
 
 const MAX_PARTS = 10_000; // S3/R2 hard limit per multipart upload.
 const MAX_BATCH = 1_000; // files per registration request
@@ -59,6 +60,7 @@ export function toVideoInfo(v: typeof videos.$inferSelect, ownerUsername: string
     size: v.size,
     mimeType: v.mimeType,
     status: v.status,
+    hidden: v.hidden,
     createdAt: v.createdAt,
     updatedAt: v.updatedAt,
   };
@@ -93,7 +95,11 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
     return { row };
   }
 
-  async function resolveTarget(projectId: string, folderId: string | null | undefined) {
+  async function resolveTarget(
+    user: AuthVariables['user'],
+    projectId: string,
+    folderId: string | null | undefined,
+  ) {
     const project = (await db.select().from(projects).where(eq(projects.id, projectId)).limit(1))[0];
     if (!project) return { error: 'Project not found' };
     let folderSlug: string | null = null;
@@ -105,7 +111,9 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
           .where(and(eq(folders.id, folderId), eq(folders.projectId, projectId)))
           .limit(1)
       )[0];
-      if (!folder) return { error: 'Folder not found in this project' };
+      if (!folder || !(await canSeeFolder(db, user, folder))) {
+        return { error: 'Folder not found in this project' };
+      }
       folderSlug = folder.slug;
     }
     return { project, folderSlug };
@@ -165,7 +173,7 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
     const body = createSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'Invalid request' }, 400);
     const user = c.get('user');
-    const target = await resolveTarget(body.data.projectId, body.data.folderId);
+    const target = await resolveTarget(user, body.data.projectId, body.data.folderId);
     if ('error' in target) return c.json({ error: target.error }, 404);
 
     const result = await registerOne(
@@ -185,7 +193,7 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
     const body = createBatchSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'Invalid request' }, 400);
     const user = c.get('user');
-    const target = await resolveTarget(body.data.projectId, body.data.folderId);
+    const target = await resolveTarget(user, body.data.projectId, body.data.folderId);
     if ('error' in target) return c.json({ error: target.error }, 404);
 
     const folderId = body.data.folderId ?? null;
@@ -220,7 +228,10 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
       results.push({ kind: 'created', filename: file.filename, ...result });
     }
     log({ op: 'upload.create_batch', ok: true, userId: user.id, count: results.length, duplicates });
-    return c.json({ results } satisfies CreateUploadBatchResponse, 201);
+    // `uploads` is the legacy pre-1.8 shape: kept so a stale cached PWA
+    // client doesn't crash against a newer server during the update window.
+    const legacy = results.filter((r) => r.kind === 'created');
+    return c.json({ results, uploads: legacy } as CreateUploadBatchResponse, 201);
   });
 
   /**

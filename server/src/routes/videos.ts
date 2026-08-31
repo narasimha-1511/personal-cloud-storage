@@ -9,6 +9,7 @@ import type { AuthVariables } from '../auth/middleware.js';
 import type { Env } from '../env.js';
 import { log } from '../log.js';
 import { toVideoInfo } from './uploads.js';
+import { canSeeVideo, visibleVideosCondition } from '../access.js';
 import { deleteVideoStorage } from './projects.js';
 
 export interface VideoRouteDeps {
@@ -41,6 +42,8 @@ export function videoRoutes({ db, env, r2 }: VideoRouteDeps) {
     const status = c.req.query('status');
 
     const conditions: SQL[] = [];
+    const visibility = visibleVideosCondition(c.get('user'));
+    if (visibility) conditions.push(visibility);
     if (projectId) conditions.push(eq(videos.projectId, projectId));
     if (folderId === 'none') conditions.push(isNull(videos.folderId));
     else if (folderId) conditions.push(eq(videos.folderId, folderId));
@@ -59,8 +62,24 @@ export function videoRoutes({ db, env, r2 }: VideoRouteDeps) {
 
   app.get('/:id', async (c) => {
     const row = await loadVideo(c.req.param('id'));
-    if (!row) return c.json({ error: 'Video not found' }, 404);
+    if (!row || !(await canSeeVideo(db, c.get('user'), row.video))) {
+      return c.json({ error: 'Video not found' }, 404);
+    }
     return c.json({ video: toVideoInfo(row.video, row.ownerUsername) });
+  });
+
+  app.post('/:id/set-hidden', async (c) => {
+    const body = z.object({ hidden: z.boolean() }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'Invalid request' }, 400);
+    const row = await loadVideo(c.req.param('id'));
+    if (!row) return c.json({ error: 'Video not found' }, 404);
+    if (!canModify(c, row.video.ownerId)) return c.json({ error: 'Forbidden' }, 403);
+    await db
+      .update(videos)
+      .set({ hidden: body.data.hidden, updatedAt: new Date().toISOString() })
+      .where(eq(videos.id, row.video.id));
+    log({ op: 'video.set_hidden', ok: true, videoId: row.video.id, userId: c.get('user').id, hidden: body.data.hidden });
+    return c.json({ ok: true });
   });
 
   for (const [path, disposition] of [
@@ -70,7 +89,9 @@ export function videoRoutes({ db, env, r2 }: VideoRouteDeps) {
     app.post(path, async (c) => {
       if (!r2) return c.json({ error: 'Object storage is not configured' }, 503);
       const row = await loadVideo(c.req.param('id'));
-      if (!row) return c.json({ error: 'Video not found' }, 404);
+      if (!row || !(await canSeeVideo(db, c.get('user'), row.video))) {
+        return c.json({ error: 'Video not found' }, 404);
+      }
       if (row.video.status !== 'READY') {
         return c.json({ error: `Video is not ready (status: ${row.video.status})` }, 409);
       }

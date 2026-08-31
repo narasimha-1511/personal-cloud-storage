@@ -14,6 +14,28 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.0.0',
+    date: '2026-08-31',
+    title: 'Privacy controls',
+    changes: [
+      'Hide any file from members — only you and admins see it',
+      'Restrict a folder to specific people (admin, via folder menu → Who can access)',
+      'Enforced on the server: hidden and restricted content is invisible everywhere, links included',
+      'Folders show who created them',
+    ],
+  },
+  {
+    version: '1.9.0',
+    date: '2026-08-31',
+    title: 'Everything, not just videos',
+    changes: [
+      'Upload any file — photos, videos, audio, documents, all in original quality',
+      'Record a video or take a photo straight from the camera into the upload queue',
+      'The viewer previews images and audio, not just video',
+      'Clear error instead of a crash when the app and server versions drift apart',
+    ],
+  },
+  {
     version: '1.8.0',
     date: '2026-08-31',
     title: 'Dedup, bulk downloads & clarity',

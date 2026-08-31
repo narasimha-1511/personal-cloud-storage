@@ -151,7 +151,6 @@ export default function TransfersPage() {
       <input
         ref={resumeInput}
         type="file"
-        accept="video/*,.mp4,.mov,.mts,.mxf,.braw,.r3d"
         multiple
         hidden
         onChange={(e) => {

@@ -52,7 +52,7 @@ export default function LibraryPage() {
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[15px] font-semibold">{p.name}</span>
                 <span className="mt-0.5 block text-[12px] text-zinc-500">
-                  {p.videoCount} video{p.videoCount === 1 ? '' : 's'}
+                  {p.videoCount} file{p.videoCount === 1 ? '' : 's'}
                   {p.folderCount > 0 && ` · ${p.folderCount} folder${p.folderCount === 1 ? '' : 's'}`}
                   {' · '}
                   {formatDate(p.createdAt)}
@@ -114,7 +114,7 @@ export default function LibraryPage() {
           <SheetAction
             icon={<IconTrash size={18} />}
             label="Delete project"
-            sub={menuFor && menuFor.videoCount > 0 ? `Deletes ${menuFor.videoCount} video(s) from storage` : 'Project is empty'}
+            sub={menuFor && menuFor.videoCount > 0 ? `Deletes ${menuFor.videoCount} file(s) from storage` : 'Project is empty'}
             danger
             onClick={() => {
               setDeleting(menuFor);

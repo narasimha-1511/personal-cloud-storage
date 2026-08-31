@@ -6,7 +6,7 @@ import { formatBytes, formatDate } from '../lib/format';
 import { startVideoDownload } from '../lib/startDownload';
 import Layout from '../components/Layout';
 import { Button, Notice, Spinner } from '../components/ui';
-import { IconDownload } from '../components/icons';
+import { IconDownload, IconFile } from '../components/icons';
 
 export default function PlayerPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,18 +22,41 @@ export default function PlayerPage() {
         setVideo(v.video);
         setUrl(u.url);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load video'));
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load file'));
   }, [id]);
 
+  const kind = video?.mimeType.startsWith('video/')
+    ? 'video'
+    : video?.mimeType.startsWith('image/')
+      ? 'image'
+      : video?.mimeType.startsWith('audio/')
+        ? 'audio'
+        : 'file';
+
   return (
-    <Layout title={video?.displayName ?? 'Player'} back={video ? `/p/${video.projectId}${video.folderId ? `?f=${video.folderId}` : ''}` : '/'}>
+    <Layout
+      title={video?.displayName ?? 'Viewer'}
+      back={video ? `/p/${video.projectId}${video.folderId ? `?f=${video.folderId}` : ''}` : '/'}
+    >
       <div className="space-y-4">
         {error && <Notice text={error} />}
         {!url && !error && <Spinner />}
-        {url && (
+        {url && kind === 'video' && (
           // Streams straight from R2 with Range support — seeking works and
           // nothing passes through the app server.
-          <video src={url} controls autoPlay playsInline className="aspect-video w-full rounded-2xl bg-black shadow-2xl" />
+          <video src={url} controls autoPlay playsInline className="aspect-video w-full rounded-2xl bg-black" />
+        )}
+        {url && kind === 'image' && (
+          <img src={url} alt={video?.displayName} className="w-full rounded-2xl bg-black object-contain" />
+        )}
+        {url && kind === 'audio' && <audio src={url} controls className="w-full" />}
+        {url && kind === 'file' && (
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] py-14">
+            <span className="text-zinc-600">
+              <IconFile size={36} />
+            </span>
+            <p className="text-[13px] text-zinc-400">No preview for this file type — download to open it.</p>
+          </div>
         )}
         {video && (
           <div className="flex items-center justify-between gap-3">
@@ -56,10 +79,12 @@ export default function PlayerPage() {
             </Button>
           </div>
         )}
-        <p className="text-xs leading-relaxed text-zinc-600">
-          Playback streams the untouched original. A high-bitrate 4K file may stutter on slow connections — the download is
-          always bit-exact regardless.
-        </p>
+        {kind === 'video' && (
+          <p className="text-xs leading-relaxed text-zinc-600">
+            Playback streams the untouched original. A high-bitrate 4K file may stutter on slow connections — the
+            download is always bit-exact regardless.
+          </p>
+        )}
       </div>
       {toast && (
         <div className="fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4">

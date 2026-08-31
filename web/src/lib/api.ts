@@ -94,6 +94,8 @@ export const api = {
     request<{ folder: FolderInfo }>(`/api/projects/${projectId}/folders`, post(body)),
   renameFolder: (id: string, body: RenameRequest) =>
     request<{ ok: true }>(`/api/folders/${id}/rename`, post(body)),
+  setFolderAccess: (id: string, restricted: boolean, userIds: string[]) =>
+    request<{ ok: true }>(`/api/folders/${id}/access`, post({ restricted, userIds })),
   deleteFolder: (id: string, force = false) =>
     request<{ ok: true }>(`/api/folders/${id}/delete`, post({ force })),
 
@@ -127,6 +129,8 @@ export const api = {
   downloadUrl: (id: string) => request<SignedUrlResponse>(`/api/videos/${id}/download-url`, post()),
   renameVideo: (id: string, name: string) =>
     request<{ ok: true }>(`/api/videos/${id}/rename`, post({ name })),
+  setVideoHidden: (id: string, hidden: boolean) =>
+    request<{ ok: true }>(`/api/videos/${id}/set-hidden`, post({ hidden })),
   moveVideo: (id: string, body: MoveVideoRequest) =>
     request<{ ok: true }>(`/api/videos/${id}/move`, post(body)),
   deleteVideo: (id: string) => request<{ ok: true }>(`/api/videos/${id}/delete`, post()),

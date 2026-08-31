@@ -28,7 +28,12 @@ export interface FolderInfo {
   slug: string;
   name: string;
   createdAt: string;
+  createdByUsername: string | null;
   videoCount: number;
+  /** Restricted folders are visible only to admins and granted users. */
+  restricted: boolean;
+  /** User ids with access to a restricted folder. Present for admins only. */
+  memberIds?: string[];
 }
 
 export interface VideoInfo {
@@ -43,8 +48,20 @@ export interface VideoInfo {
   size: number;
   mimeType: string;
   status: VideoStatus;
+  /** Hidden files are visible only to their owner and admins. */
+  hidden: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SetHiddenRequest {
+  hidden: boolean;
+}
+
+export interface FolderAccessRequest {
+  restricted: boolean;
+  /** Users allowed into the folder when restricted. */
+  userIds: string[];
 }
 
 // ---- Auth ----

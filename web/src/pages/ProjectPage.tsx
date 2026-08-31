@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { LazyList } from '../components/LazyList';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import type { FolderInfo, ProjectInfo, VideoInfo } from '@videovault/shared';
+import type { FolderInfo, ProjectInfo, UserInfo, VideoInfo } from '@videovault/shared';
 import { api } from '../lib/api';
 import { ensureManagersInit, uploadManager, useUploads } from '../lib/managers';
 import { startVideoDownload } from '../lib/startDownload';
@@ -23,11 +23,15 @@ import {
 import {
   IconCheck,
   IconDownload,
+  IconEyeOff,
+  IconFile,
   IconFilm,
   IconFolder,
   IconFolderMove,
   IconHome,
+  IconImage,
   IconLink,
+  IconLock,
   IconMore,
   IconPencil,
   IconPlay,
@@ -61,6 +65,7 @@ export default function ProjectPage() {
   const [renamingFolder, setRenamingFolder] = useState<FolderInfo | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<FolderInfo | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [accessFolder, setAccessFolder] = useState<FolderInfo | null>(null);
 
   // multi-select
   const [selectMode, setSelectMode] = useState(false);
@@ -72,6 +77,9 @@ export default function ProjectPage() {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'name'>('newest');
 
   const fileInput = useRef<HTMLInputElement>(null);
+  const recordInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const [addSheetOpen, setAddSheetOpen] = useState(false);
   const uploads = useUploads();
   const startedHere = useRef(new Map<string, string>());
   const hereKey = `${projectId}:${folderId ?? ''}`;
@@ -144,7 +152,7 @@ export default function ProjectPage() {
   async function downloadSelected() {
     const ready = selectedVideos.filter((v) => v.status === 'READY');
     if (ready.length === 0) {
-      setNotice('None of the selected videos are ready to download yet.');
+      setNotice('None of the selected files are ready to download yet.');
       return;
     }
     try {
@@ -307,9 +315,13 @@ export default function ProjectPage() {
                         <IconFolder size={18} />
                       </span>
                       <span className="min-w-0">
-                        <span className="block truncate text-[13px] font-medium">{f.name}</span>
-                        <span className="block text-[11px] text-zinc-600">
-                          {f.videoCount} video{f.videoCount === 1 ? '' : 's'}
+                        <span className="flex items-center gap-1.5 truncate text-[13px] font-medium">
+                          <span className="truncate">{f.name}</span>
+                          {f.restricted && <IconLock size={11} className="shrink-0 text-amber-400/80" />}
+                        </span>
+                        <span className="block truncate text-[11px] text-zinc-600">
+                          {f.videoCount} file{f.videoCount === 1 ? '' : 's'}
+                          {f.createdByUsername ? ` · by ${f.createdByUsername}` : ''}
                         </span>
                       </span>
                     </button>
@@ -333,7 +345,7 @@ export default function ProjectPage() {
         <section>
           <div className="mb-2.5 flex h-7 items-center justify-between">
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
-              {selectMode ? `${selected.size} selected` : currentFolder ? 'Videos' : 'Videos in project root'}
+              {selectMode ? `${selected.size} selected` : currentFolder ? 'Files' : 'Files in project root'}
             </h2>
             {selectMode ? (
               <button onClick={exitSelect} className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100">
@@ -409,7 +421,7 @@ export default function ProjectPage() {
             )}
           </div>
           {videos?.length === 0 && localUploads.length === 0 && (
-            <EmptyState icon={<IconFilm size={30} />} title="Nothing here yet" sub="Add videos to upload originals in full quality." />
+            <EmptyState icon={<IconFilm size={30} />} title="Nothing here yet" sub="Add videos, photos, or any file — originals, untouched." />
           )}
         </section>
       </div>
@@ -431,16 +443,15 @@ export default function ProjectPage() {
         </div>
       ) : (
         <button
-          onClick={() => fileInput.current?.click()}
+          onClick={() => setAddSheetOpen(true)}
           className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-30 flex h-12 items-center gap-2 rounded-full bg-blue-600 pl-4 pr-5 text-[14px] font-semibold text-white transition-colors hover:bg-blue-500 active:opacity-90"
         >
-          <IconPlus size={18} /> Add videos
+          <IconPlus size={18} /> Add
         </button>
       )}
       <input
         ref={fileInput}
         type="file"
-        accept="video/*,.mp4,.mov,.mts,.mxf,.braw,.r3d"
         multiple
         hidden
         onChange={(e) => {
@@ -448,6 +459,62 @@ export default function ProjectPage() {
           e.target.value = '';
         }}
       />
+      {/* capture= makes these open the camera directly; the recording goes
+          straight into the upload queue. */}
+      <input
+        ref={recordInput}
+        type="file"
+        accept="video/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          if (e.target.files?.length) void addFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={photoInput}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          if (e.target.files?.length) void addFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+
+      {/* --- add source sheet --- */}
+      <Sheet open={addSheetOpen} onClose={() => setAddSheetOpen(false)} title="Add to this folder">
+        <div className="space-y-0.5">
+          <SheetAction
+            icon={<IconFolder size={18} />}
+            label="Choose files"
+            sub="Videos, photos, any file — originals, untouched"
+            onClick={() => {
+              setAddSheetOpen(false);
+              fileInput.current?.click();
+            }}
+          />
+          <SheetAction
+            icon={<IconPlay size={18} />}
+            label="Record a video"
+            sub="Opens the camera; uploads when you stop"
+            onClick={() => {
+              setAddSheetOpen(false);
+              recordInput.current?.click();
+            }}
+          />
+          <SheetAction
+            icon={<IconImage size={18} />}
+            label="Take a photo"
+            onClick={() => {
+              setAddSheetOpen(false);
+              photoInput.current?.click();
+            }}
+          />
+        </div>
+      </Sheet>
 
       {toast && (
         <div className="fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4">
@@ -465,9 +532,9 @@ export default function ProjectPage() {
             {videoMenu.status === 'READY' && (
               <>
                 <SheetAction
-                  icon={<IconPlay size={18} />}
-                  label="Play"
-                  sub="Streams the original — nothing is re-encoded"
+                  icon={videoMenu.mimeType.startsWith('image/') ? <IconImage size={18} /> : <IconPlay size={18} />}
+                  label={videoMenu.mimeType.startsWith('video/') ? 'Play' : 'View'}
+                  sub="Opens the original — nothing is re-encoded"
                   onClick={() => navigate(`/watch/${videoMenu.id}`)}
                 />
                 <SheetAction
@@ -512,6 +579,22 @@ export default function ProjectPage() {
                   onClick={() => {
                     setRenamingVideo(videoMenu);
                     setVideoMenu(null);
+                  }}
+                />
+                <SheetAction
+                  icon={<IconEyeOff size={18} />}
+                  label={videoMenu.hidden ? 'Unhide' : 'Hide from members'}
+                  sub={videoMenu.hidden ? 'Currently visible only to you and admins' : 'Only you and admins will see it'}
+                  onClick={async () => {
+                    const v = videoMenu;
+                    setVideoMenu(null);
+                    try {
+                      await api.setVideoHidden(v.id, !v.hidden);
+                      showToast(v.hidden ? 'Visible to everyone again' : 'Hidden from members');
+                      load();
+                    } catch (err) {
+                      setNotice(err instanceof Error ? err.message : 'Could not change visibility');
+                    }
                   }}
                 />
                 <SheetAction
@@ -621,6 +704,15 @@ export default function ProjectPage() {
             }}
           />
           <SheetAction
+            icon={<IconLock size={18} />}
+            label="Who can access"
+            sub={folderMenu?.restricted ? 'Restricted to specific people' : 'Everyone can see this folder'}
+            onClick={() => {
+              setAccessFolder(folderMenu);
+              setFolderMenu(null);
+            }}
+          />
+          <SheetAction
             icon={<IconTrash size={18} />}
             label="Delete folder"
             sub={folderMenu && folderMenu.videoCount > 0 ? `Deletes ${folderMenu.videoCount} video(s) from storage` : 'Folder is empty'}
@@ -643,6 +735,19 @@ export default function ProjectPage() {
           load();
         }}
       />
+      {accessFolder && (
+        <FolderAccessSheet
+          folder={accessFolder}
+          onClose={() => setAccessFolder(null)}
+          onSaved={() => {
+            setAccessFolder(null);
+            showToast('Folder access updated');
+            load();
+          }}
+          onError={setNotice}
+        />
+      )}
+
       <ConfirmSheet
         open={deletingFolder !== null}
         onClose={() => setDeletingFolder(null)}
@@ -705,9 +810,9 @@ const VideoRow = memo(function VideoRow({
           disabled={v.status !== 'READY'}
           onClick={() => onPlay(v)}
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-zinc-300 transition-colors hover:bg-white/[0.08] disabled:opacity-40"
-          aria-label={`Play ${v.displayName}`}
+          aria-label={`Open ${v.displayName}`}
         >
-          <IconPlay size={16} />
+          {v.mimeType.startsWith('image/') ? <IconImage size={16} /> : v.mimeType.startsWith('video/') ? <IconPlay size={16} /> : <IconFile size={16} />}
         </button>
       )}
       <button
@@ -716,7 +821,10 @@ const VideoRow = memo(function VideoRow({
         disabled={selectMode && !selectable}
       >
         <span className="flex items-center justify-between gap-3">
-          <span className="truncate text-[14px] font-medium">{v.displayName}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[14px] font-medium">{v.displayName}</span>
+            {v.hidden && <IconEyeOff size={12} className="shrink-0 text-amber-400/80" />}
+          </span>
           {!selectMode && <StatusChip state={v.status} />}
         </span>
         <span className="mt-0.5 block text-[12px] text-zinc-600 tabular-nums">
@@ -735,3 +843,107 @@ const VideoRow = memo(function VideoRow({
     </div>
   );
 });
+
+
+/** Admin sheet: restrict a folder to specific accounts. */
+function FolderAccessSheet({
+  folder,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  folder: FolderInfo;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [users, setUsers] = useState<(UserInfo & { active: boolean })[] | null>(null);
+  const [restricted, setRestricted] = useState(folder.restricted);
+  const [members, setMembers] = useState<Set<string>>(new Set(folder.memberIds ?? []));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .listUsers()
+      .then((r) => setUsers(r.users))
+      .catch(() => onError('Could not load the user list'));
+  }, [onError]);
+
+  return (
+    <Sheet open onClose={onClose} title={`Who can access “${folder.name}”`}>
+      <div className="space-y-4">
+        <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5">
+          {[
+            { v: false, label: 'Everyone' },
+            { v: true, label: 'Specific people' },
+          ].map((o) => (
+            <button
+              key={o.label}
+              type="button"
+              onClick={() => setRestricted(o.v)}
+              className={`h-9 flex-1 rounded-[7px] text-[13px] font-medium transition-colors ${
+                restricted === o.v ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {restricted && (
+          <div className="max-h-[40vh] space-y-1 overflow-y-auto">
+            {users === null && <Spinner />}
+            {users
+              ?.filter((u) => u.role !== 'admin')
+              .map((u) => {
+                const on = members.has(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    onClick={() =>
+                      setMembers((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(u.id)) next.delete(u.id);
+                        else next.add(u.id);
+                        return next;
+                      })
+                    }
+                    className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left hover:bg-white/[0.06]"
+                  >
+                    <span
+                      className={`flex h-[20px] w-[20px] items-center justify-center rounded-full border transition-colors ${
+                        on ? 'border-blue-500 bg-blue-500 text-white' : 'border-white/25 text-transparent'
+                      }`}
+                    >
+                      <IconCheck size={12} />
+                    </span>
+                    <span className="text-[14px] font-medium">{u.username}</span>
+                    {!u.active && <span className="text-[11px] text-red-400">deactivated</span>}
+                  </button>
+                );
+              })}
+            <p className="px-1 pt-1 text-[11px] text-zinc-600">Admins always have access.</p>
+          </div>
+        )}
+        <Button
+          full
+          kind="primary"
+          size="lg"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await api.setFolderAccess(folder.id, restricted, restricted ? [...members] : []);
+              onSaved();
+            } catch (err) {
+              onError(err instanceof Error ? err.message : 'Could not update access');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Saving…' : 'Save access'}
+        </Button>
+      </div>
+    </Sheet>
+  );
+}

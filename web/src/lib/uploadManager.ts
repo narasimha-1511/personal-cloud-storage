@@ -287,7 +287,7 @@ export class UploadManager {
     const CHUNK = 500;
     for (let i = 0; i < fresh.length; i += CHUNK) {
       const chunk = fresh.slice(i, i + CHUNK);
-      const { results } = await this.api.createUploadBatch({
+      const response = await this.api.createUploadBatch({
         projectId: target.projectId,
         folderId: target.folderId ?? null,
         files: chunk.map(({ file }) => ({
@@ -296,6 +296,10 @@ export class UploadManager {
           mimeType: file.type || 'application/octet-stream',
         })),
       });
+      const results = response?.results;
+      if (!Array.isArray(results)) {
+        throw new Error('The app and server are on different versions — open the menu and Check for updates, then retry.');
+      }
       const now = Date.now();
       const rows: LocalUpload[] = [];
       for (let idx = 0; idx < chunk.length; idx++) {

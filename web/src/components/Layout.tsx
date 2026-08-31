@@ -78,7 +78,7 @@ export default function Layout({ children, title, back }: { children: ReactNode;
     setResumeMsg(
       ok > 0
         ? `${ok} upload${ok === 1 ? '' : 's'} resumed${miss > 0 ? ` — ${miss} file${miss === 1 ? '' : 's'} didn't match` : ''}`
-        : 'None of the picked files matched — select the exact original videos.',
+        : 'None of the picked files matched — select the exact original files.',
     );
     setTimeout(() => setResumeMsg(null), 5000);
   }
@@ -133,7 +133,6 @@ export default function Layout({ children, title, back }: { children: ReactNode;
         <input
           ref={resumeInput}
           type="file"
-          accept="video/*,.mp4,.mov,.mts,.mxf,.braw,.r3d"
           multiple
           hidden
           onChange={(e) => {

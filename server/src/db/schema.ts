@@ -39,9 +39,25 @@ export const folders = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     slug: text('slug').notNull(),
     name: text('name').notNull(),
+    // Restricted folders are visible only to admins and granted users.
+    restricted: integer('restricted', { mode: 'boolean' }).notNull().default(false),
+    createdBy: text('created_by').references(() => users.id),
     createdAt: text('created_at').notNull(),
   },
   (t) => ({ projectSlugIdx: uniqueIndex('folders_project_slug_idx').on(t.projectId, t.slug) }),
+);
+
+export const folderAccess = sqliteTable(
+  'folder_access',
+  {
+    folderId: text('folder_id')
+      .notNull()
+      .references(() => folders.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.folderId, t.userId] }) }),
 );
 
 export const videos = sqliteTable(
@@ -61,6 +77,8 @@ export const videos = sqliteTable(
     size: integer('size').notNull(),
     mimeType: text('mime_type').notNull(),
     status: text('status', { enum: ['UPLOADING', 'READY', 'ABORTED', 'FAILED'] }).notNull(),
+    // Hidden files are visible only to their owner and admins.
+    hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
