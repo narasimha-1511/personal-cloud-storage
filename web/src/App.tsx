@@ -1,34 +1,31 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth';
-import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
-import UploaderPage from './pages/UploaderPage';
-import BrowsePage from './pages/BrowsePage';
+import LibraryPage from './pages/LibraryPage';
+import ProjectPage from './pages/ProjectPage';
+import TransfersPage from './pages/TransfersPage';
 import PlayerPage from './pages/PlayerPage';
-import EditorPage from './pages/EditorPage';
 import AdminPage from './pages/AdminPage';
 
 function Shell() {
   const { user, loading } = useAuth();
   if (loading) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-slate-950 text-slate-500">
-        <p className="text-sm">Loading…</p>
+      <main className="flex min-h-dvh items-center justify-center bg-[#070b14]">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/10 border-t-sky-400" />
       </main>
     );
   }
   if (!user) return <LoginPage />;
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<UploaderPage />} />
-        <Route path="/browse" element={<BrowsePage />} />
-        <Route path="/watch/:id" element={<PlayerPage />} />
-        <Route path="/editor" element={<EditorPage />} />
-        <Route path="/admin" element={user.role === 'admin' ? <AdminPage /> : <Navigate to="/" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Layout>
+    <Routes>
+      <Route path="/" element={<LibraryPage />} />
+      <Route path="/p/:projectId" element={<ProjectPage />} />
+      <Route path="/transfers" element={<TransfersPage />} />
+      <Route path="/watch/:id" element={<PlayerPage />} />
+      <Route path="/admin" element={user.role === 'admin' ? <AdminPage /> : <Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 

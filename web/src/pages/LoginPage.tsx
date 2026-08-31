@@ -23,11 +23,14 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-slate-950 p-6">
-      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold tracking-widest text-slate-100">VIDEO VAULT</h1>
-          <p className="mt-1 text-sm text-slate-400">Private raw footage transfer</p>
+    <main className="flex min-h-dvh items-center justify-center bg-[#070b14] p-6">
+      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-5">
+        <div className="mb-8 text-center">
+          <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-400 text-2xl shadow-xl shadow-sky-500/30">
+            ▶
+          </span>
+          <h1 className="text-xl font-bold tracking-tight text-slate-100">Video Vault</h1>
+          <p className="mt-1 text-sm text-slate-500">Original footage, safely transferred</p>
         </div>
         <Field label="Username">
           <input
@@ -50,7 +53,7 @@ export default function LoginPage() {
           />
         </Field>
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <Button type="submit" kind="primary" full disabled={busy}>
+        <Button type="submit" kind="primary" full size="lg" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>

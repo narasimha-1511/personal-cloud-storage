@@ -2,21 +2,27 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { Role, UserInfo } from '@videovault/shared';
 import { api } from '../lib/api';
 import { formatDate } from '../lib/format';
-import { Button, Card, Field, inputClass } from '../components/ui';
 import { useAuth } from '../auth';
+import Layout from '../components/Layout';
+import { Button, Card, Field, InputSheet, Notice, Sheet, SheetAction, Spinner, inputClass } from '../components/ui';
 
 type UserRow = UserInfo & { active: boolean };
 
 export default function AdminPage() {
   const { user: me } = useAuth();
-  const [users, setUsers] = useState<UserRow[]>([]);
+  const [users, setUsers] = useState<UserRow[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>('user');
+  const [menuFor, setMenuFor] = useState<UserRow | null>(null);
+  const [resetting, setResetting] = useState<UserRow | null>(null);
 
   const load = useCallback(() => {
-    api.listUsers().then((r) => setUsers(r.users)).catch((e) => setNotice(e instanceof Error ? e.message : 'Failed to load'));
+    api
+      .listUsers()
+      .then((r) => setUsers(r.users))
+      .catch((e) => setNotice(e instanceof Error ? e.message : 'Failed to load users'));
   }, []);
   useEffect(load, [load]);
 
@@ -34,74 +40,105 @@ export default function AdminPage() {
     }
   }
 
-  async function act(fn: () => Promise<unknown>) {
-    setNotice(null);
-    try {
-      await fn();
-      load();
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Operation failed');
-    }
-  }
-
   return (
-    <div className="space-y-4">
-      <Card>
-        <form onSubmit={createUser} className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Create user</h2>
-          <div className="grid grid-cols-2 gap-3">
+    <Layout title="Manage users" back="/">
+      <div className="space-y-5">
+        {notice && <Notice text={notice} onDismiss={() => setNotice(null)} />}
+
+        <Card>
+          <form onSubmit={createUser} className="space-y-4">
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Invite someone</h2>
             <Field label="Username">
               <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" required minLength={2} />
             </Field>
             <Field label="Password">
               <input className={inputClass} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
             </Field>
-          </div>
-          <Field label="Role">
-            <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              <option value="user">user — upload, download, manage own videos</option>
-              <option value="admin">admin — everything</option>
-            </select>
-          </Field>
-          <Button type="submit" kind="primary">
-            Create user
-          </Button>
-        </form>
-      </Card>
+            <Field label="Role">
+              <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                <option value="user">Member — upload, download, manage own videos</option>
+                <option value="admin">Admin — everything, including users</option>
+              </select>
+            </Field>
+            <Button type="submit" kind="primary" full>
+              Create account
+            </Button>
+          </form>
+        </Card>
 
-      {notice && <p className="rounded-lg border border-amber-800 bg-amber-950 px-3 py-2 text-sm text-amber-200">{notice}</p>}
-
-      <section className="space-y-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Users</h2>
-        {users.map((u) => (
-          <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2">
-            <div>
-              <p className="text-sm font-medium">
-                {u.username}
-                <span className="ml-2 rounded bg-slate-700 px-1.5 py-0.5 text-xs text-slate-300">{u.role}</span>
-                {!u.active && <span className="ml-2 rounded bg-red-900 px-1.5 py-0.5 text-xs text-red-200">deactivated</span>}
-              </p>
-              <p className="text-xs text-slate-500">since {formatDate(u.createdAt)}</p>
-            </div>
-            <div className="flex gap-1">
-              <Button
-                kind="ghost"
-                onClick={() => {
-                  const pw = prompt(`New password for ${u.username} (min 8 chars):`);
-                  if (pw) void act(() => api.resetPassword(u.id, pw));
-                }}
-              >
-                Reset password
-              </Button>
-              {u.id !== me?.id && (
-                <Button kind={u.active ? 'danger' : 'default'} onClick={() => void act(() => api.setUserActive(u.id, !u.active))}>
-                  {u.active ? 'Deactivate' : 'Reactivate'}
-                </Button>
-              )}
-            </div>
+        <section>
+          <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-500">Accounts</h2>
+          {users === null && <Spinner />}
+          <div className="space-y-2">
+            {users?.map((u) => (
+              <div key={u.id} className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/[0.04] p-3.5">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/8 text-sm font-bold text-sky-300">
+                  {u.username.slice(0, 1).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">
+                    {u.username}
+                    {u.id === me?.id && <span className="ml-1.5 text-xs font-normal text-slate-500">(you)</span>}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {u.role === 'admin' ? 'Admin' : 'Member'} · since {formatDate(u.createdAt)}
+                    {!u.active && <span className="ml-1.5 font-semibold text-red-400">deactivated</span>}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setMenuFor(u)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg text-slate-500 hover:bg-white/10 hover:text-slate-200"
+                  aria-label={`Options for ${u.username}`}
+                >
+                  ⋯
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
-      </section>
-    </div>
+        </section>
+      </div>
+
+      <Sheet open={menuFor !== null} onClose={() => setMenuFor(null)} title={menuFor?.username}>
+        <div className="space-y-1">
+          <SheetAction
+            icon="🔑"
+            label="Reset password"
+            onClick={() => {
+              setResetting(menuFor);
+              setMenuFor(null);
+            }}
+          />
+          {menuFor?.id !== me?.id && (
+            <SheetAction
+              icon={menuFor?.active ? '🚫' : '✅'}
+              label={menuFor?.active ? 'Deactivate account' : 'Reactivate account'}
+              sub={menuFor?.active ? 'Signs them out everywhere immediately' : undefined}
+              danger={menuFor?.active}
+              onClick={async () => {
+                const u = menuFor!;
+                setMenuFor(null);
+                try {
+                  await api.setUserActive(u.id, !u.active);
+                  load();
+                } catch (err) {
+                  setNotice(err instanceof Error ? err.message : 'Operation failed');
+                }
+              }}
+            />
+          )}
+        </div>
+      </Sheet>
+
+      <InputSheet
+        open={resetting !== null}
+        onClose={() => setResetting(null)}
+        title={`New password for ${resetting?.username}`}
+        placeholder="At least 8 characters"
+        submitLabel="Set password"
+        onSubmit={async (pw) => {
+          await api.resetPassword(resetting!.id, pw);
+        }}
+      />
+    </Layout>
   );
 }
