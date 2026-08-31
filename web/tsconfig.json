@@ -3,7 +3,7 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client", "wicg-file-system-access"]
+    "types": ["vite/client", "wicg-file-system-access", "vite-plugin-pwa/react"]
   },
   "include": ["src", "test"]
 }

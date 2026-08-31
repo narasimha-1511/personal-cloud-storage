@@ -8,7 +8,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt': never swap the app out from under an active upload — the
+      // UpdateToast lets the user apply the new version when they choose.
+      registerType: 'prompt',
       includeAssets: ['pwa-64.png'],
       manifest: {
         name: 'Video Vault',
