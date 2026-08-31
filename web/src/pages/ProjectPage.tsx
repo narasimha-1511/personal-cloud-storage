@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { LazyList } from '../components/LazyList';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { FolderInfo, ProjectInfo, VideoInfo } from '@videovault/shared';
 import { api } from '../lib/api';
@@ -34,7 +35,9 @@ import {
   IconTrash,
 } from '../components/icons';
 
-const ACTIVE_STATES = ['queued', 'uploading', 'completing', 'waiting_network', 'paused', 'needs_file'];
+// Shown as inline progress cards; queued files are summarized in one line
+// instead of rendering a card each (a 600-file selection would be 600 cards).
+const INLINE_STATES = ['uploading', 'completing', 'waiting_network', 'paused', 'needs_file'];
 
 export default function ProjectPage() {
   const { projectId = '' } = useParams();
@@ -66,9 +69,13 @@ export default function ProjectPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const uploads = useUploads();
   const startedHere = useRef(new Map<string, string>());
+  const hereKey = `${projectId}:${folderId ?? ''}`;
   const localUploads = uploads.filter(
-    (u) => ACTIVE_STATES.includes(u.state) && startedHere.current.get(u.localId) === `${projectId}:${folderId ?? ''}`,
+    (u) => INLINE_STATES.includes(u.state) && startedHere.current.get(u.localId) === hereKey,
   );
+  const queuedHere = uploads.filter(
+    (u) => u.state === 'queued' && startedHere.current.get(u.localId) === hereKey,
+  ).length;
 
   const currentFolder = folders.find((f) => f.id === folderId) ?? null;
   const canModify = useCallback((v: VideoInfo) => isAdmin || v.ownerId === user?.id, [isAdmin, user?.id]);
@@ -124,15 +131,16 @@ export default function ProjectPage() {
     }
   }
 
-  function toggleSelect(v: VideoInfo) {
-    if (!canModify(v)) return;
+  // Stable handlers so memoized rows only re-render when their own data changes.
+  const onRowToggle = useCallback((v: VideoInfo) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(v.id)) next.delete(v.id);
       else next.add(v.id);
       return next;
     });
-  }
+  }, []);
+  const onRowPlay = useCallback((v: VideoInfo) => navigate(`/watch/${v.id}`), [navigate]);
 
   function exitSelect() {
     setSelectMode(false);
@@ -176,7 +184,7 @@ export default function ProjectPage() {
         )}
 
         {/* uploads running for THIS location */}
-        {localUploads.length > 0 && (
+        {(localUploads.length > 0 || queuedHere > 0) && (
           <div className="space-y-2">
             {localUploads.map((u) => (
               <div key={u.localId} className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
@@ -197,6 +205,11 @@ export default function ProjectPage() {
                 </div>
               </div>
             ))}
+            {queuedHere > 0 && (
+              <p className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[12px] text-zinc-500 tabular-nums">
+                {queuedHere} more file{queuedHere === 1 ? '' : 's'} queued — uploading one at a time. Track everything in Transfers.
+              </p>
+            )}
           </div>
         )}
 
@@ -274,66 +287,24 @@ export default function ProjectPage() {
 
           {videos === null && <Spinner />}
           <div className="space-y-2">
-            {videos?.map((v) => {
-              const selectable = canModify(v);
-              const isSelected = selected.has(v.id);
-              return (
-                <div
-                  key={v.id}
-                  className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${
-                    isSelected ? 'border-blue-500/50 bg-blue-500/[0.06]' : 'border-white/[0.08] bg-white/[0.03]'
-                  } ${selectMode && !selectable ? 'opacity-40' : ''}`}
-                >
-                  {selectMode ? (
-                    <button
-                      onClick={() => toggleSelect(v)}
-                      disabled={!selectable}
-                      className="flex h-12 w-12 shrink-0 items-center justify-center"
-                      aria-label={isSelected ? `Deselect ${v.displayName}` : `Select ${v.displayName}`}
-                    >
-                      <span
-                        className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border transition-colors ${
-                          isSelected ? 'border-blue-500 bg-blue-500 text-white' : 'border-white/25 text-transparent'
-                        }`}
-                      >
-                        <IconCheck size={13} />
-                      </span>
-                    </button>
-                  ) : (
-                    <button
-                      disabled={v.status !== 'READY'}
-                      onClick={() => navigate(`/watch/${v.id}`)}
-                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-zinc-300 transition-colors hover:bg-white/[0.08] disabled:opacity-40"
-                      aria-label={`Play ${v.displayName}`}
-                    >
-                      <IconPlay size={16} />
-                    </button>
-                  )}
-                  <button
-                    className="min-w-0 flex-1 text-left"
-                    onClick={() => (selectMode ? toggleSelect(v) : setVideoMenu(v))}
-                    disabled={selectMode && !selectable}
-                  >
-                    <span className="flex items-center justify-between gap-3">
-                      <span className="truncate text-[14px] font-medium">{v.displayName}</span>
-                      {!selectMode && <StatusChip state={v.status} />}
-                    </span>
-                    <span className="mt-0.5 block text-[12px] text-zinc-600 tabular-nums">
-                      {formatBytes(v.size)} · {formatDate(v.createdAt)} · {v.ownerUsername}
-                    </span>
-                  </button>
-                  {!selectMode && (
-                    <button
-                      onClick={() => setVideoMenu(v)}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"
-                      aria-label={`Options for ${v.displayName}`}
-                    >
-                      <IconMore size={18} />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+            {videos && (
+              <LazyList
+                items={videos}
+                keyFor={(v) => v.id}
+                estimateHeight={74}
+                renderItem={(v) => (
+                  <VideoRow
+                    v={v}
+                    selectMode={selectMode}
+                    isSelected={selected.has(v.id)}
+                    selectable={canModify(v)}
+                    onToggle={onRowToggle}
+                    onMenu={setVideoMenu}
+                    onPlay={onRowPlay}
+                  />
+                )}
+              />
+            )}
           </div>
           {videos?.length === 0 && localUploads.length === 0 && (
             <EmptyState icon={<IconFilm size={30} />} title="Nothing here yet" sub="Add videos to upload originals in full quality." />
@@ -585,3 +556,77 @@ export default function ProjectPage() {
     </Layout>
   );
 }
+
+const VideoRow = memo(function VideoRow({
+  v,
+  selectMode,
+  isSelected,
+  selectable,
+  onToggle,
+  onMenu,
+  onPlay,
+}: {
+  v: VideoInfo;
+  selectMode: boolean;
+  isSelected: boolean;
+  selectable: boolean;
+  onToggle: (v: VideoInfo) => void;
+  onMenu: (v: VideoInfo) => void;
+  onPlay: (v: VideoInfo) => void;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${
+        isSelected ? 'border-blue-500/50 bg-blue-500/[0.06]' : 'border-white/[0.08] bg-white/[0.03]'
+      } ${selectMode && !selectable ? 'opacity-40' : ''}`}
+    >
+      {selectMode ? (
+        <button
+          onClick={() => selectable && onToggle(v)}
+          disabled={!selectable}
+          className="flex h-12 w-12 shrink-0 items-center justify-center"
+          aria-label={isSelected ? `Deselect ${v.displayName}` : `Select ${v.displayName}`}
+        >
+          <span
+            className={`flex h-[22px] w-[22px] items-center justify-center rounded-full border transition-colors ${
+              isSelected ? 'border-blue-500 bg-blue-500 text-white' : 'border-white/25 text-transparent'
+            }`}
+          >
+            <IconCheck size={13} />
+          </span>
+        </button>
+      ) : (
+        <button
+          disabled={v.status !== 'READY'}
+          onClick={() => onPlay(v)}
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-zinc-300 transition-colors hover:bg-white/[0.08] disabled:opacity-40"
+          aria-label={`Play ${v.displayName}`}
+        >
+          <IconPlay size={16} />
+        </button>
+      )}
+      <button
+        className="min-w-0 flex-1 text-left"
+        onClick={() => (selectMode ? selectable && onToggle(v) : onMenu(v))}
+        disabled={selectMode && !selectable}
+      >
+        <span className="flex items-center justify-between gap-3">
+          <span className="truncate text-[14px] font-medium">{v.displayName}</span>
+          {!selectMode && <StatusChip state={v.status} />}
+        </span>
+        <span className="mt-0.5 block text-[12px] text-zinc-600 tabular-nums">
+          {formatBytes(v.size)} · {formatDate(v.createdAt)} · {v.ownerUsername}
+        </span>
+      </button>
+      {!selectMode && (
+        <button
+          onClick={() => onMenu(v)}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"
+          aria-label={`Options for ${v.displayName}`}
+        >
+          <IconMore size={18} />
+        </button>
+      )}
+    </div>
+  );
+});

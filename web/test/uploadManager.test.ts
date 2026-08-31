@@ -327,3 +327,22 @@ describe('bulk add', () => {
     expect([...backend.uploads.values()].every((u) => u.status === 'COMPLETED')).toBe(true);
   });
 });
+
+describe('render performance', () => {
+  it('snapshot keeps identical view objects for unchanged uploads', async () => {
+    const backend = new MockBackend();
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+    const a = await mgr.addFile(makeFile(backend.partSize, 'A.MP4'), { projectId: 'p1' });
+    await waitFor(() => stateOf(mgr, a)?.state === 'done', 5000, 'a done');
+
+    const before = mgr.snapshot().find((v) => v.localId === a)!;
+    // Unrelated activity: a second upload starts and progresses.
+    const b = await mgr.addFile(makeFile(backend.partSize * 3, 'B.MP4'), { projectId: 'p1' });
+    const during = mgr.snapshot().find((v) => v.localId === a)!;
+    // A's view is the exact same object, so a memoized row skips re-render.
+    expect(during).toBe(before);
+    await waitFor(() => stateOf(mgr, b)?.state === 'done', 5000, 'b done');
+    expect(mgr.snapshot().find((v) => v.localId === a)!).toBe(before);
+  });
+});

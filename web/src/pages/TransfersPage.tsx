@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { LazyList } from '../components/LazyList';
 import { downloadManager, ensureManagersInit, uploadManager, useDownloads, useUploads } from '../lib/managers';
 import { formatBytes, formatEta, formatSpeed, percent } from '../lib/format';
 import type { UploadView } from '../lib/uploadManager';
@@ -21,6 +22,18 @@ export default function TransfersPage() {
 
   const activeUploads = uploads.filter((u) => u.state !== 'done' && u.state !== 'aborted');
   const finishedUploads = uploads.filter((u) => u.state === 'done' || u.state === 'aborted');
+
+  // Stable handlers so memoized cards skip re-rendering on progress ticks.
+  const onResume = useCallback((u: UploadView) => {
+    if (u.state === 'needs_file') {
+      resumeTarget.current = u.localId;
+      resumeInput.current?.click();
+    } else {
+      void uploadManager.resume(u.localId);
+    }
+  }, []);
+  const onPause = useCallback((u: UploadView) => void uploadManager.pause(u.localId), []);
+  const onCancel = useCallback((u: UploadView) => setCancelling(u), []);
 
   async function onResumePick(files: FileList) {
     const targetId = resumeTarget.current;
@@ -51,22 +64,12 @@ export default function TransfersPage() {
         <section>
           <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>
           <div className="space-y-2">
-            {activeUploads.map((u) => (
-              <UploadCard
-                key={u.localId}
-                u={u}
-                onResume={() => {
-                  if (u.state === 'needs_file') {
-                    resumeTarget.current = u.localId;
-                    resumeInput.current?.click();
-                  } else {
-                    void uploadManager.resume(u.localId);
-                  }
-                }}
-                onPause={() => void uploadManager.pause(u.localId)}
-                onCancel={() => setCancelling(u)}
-              />
-            ))}
+            <LazyList
+              items={activeUploads}
+              keyFor={(u) => u.localId}
+              estimateHeight={160}
+              renderItem={(u) => <UploadCard u={u} onResume={onResume} onPause={onPause} onCancel={onCancel} />}
+            />
           </div>
           {activeUploads.length === 0 && (
             <EmptyState icon={<IconTransfers size={28} />} title="No active uploads" sub="Add videos from any project in the Library." />
@@ -88,23 +91,12 @@ export default function TransfersPage() {
           <section>
             <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Finished</h2>
             <div className="space-y-2">
-              {finishedUploads.map((u) => (
-                <div key={u.localId} className="flex items-center justify-between gap-3 rounded-2xl border border-white/6 bg-white/[0.03] px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-zinc-300">{u.filename}</p>
-                    <p className="text-[11px] text-zinc-600 tabular-nums">{formatBytes(u.size)}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <StatusChip state={u.state} />
-                    <button
-                      className="text-xs text-zinc-600 hover:text-zinc-300"
-                      onClick={() => void uploadManager.remove(u.localId)}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-              ))}
+              <LazyList
+                items={finishedUploads}
+                keyFor={(u) => u.localId}
+                estimateHeight={60}
+                renderItem={(u) => <FinishedRow u={u} />}
+              />
             </div>
           </section>
         )}
@@ -136,16 +128,33 @@ export default function TransfersPage() {
   );
 }
 
-function UploadCard({
+const FinishedRow = memo(function FinishedRow({ u }: { u: UploadView }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-zinc-300">{u.filename}</p>
+        <p className="text-[11px] text-zinc-600 tabular-nums">{formatBytes(u.size)}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <StatusChip state={u.state} />
+        <button className="text-xs text-zinc-600 hover:text-zinc-300" onClick={() => void uploadManager.remove(u.localId)}>
+          Clear
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const UploadCard = memo(function UploadCard({
   u,
   onResume,
   onPause,
   onCancel,
 }: {
   u: UploadView;
-  onResume: () => void;
-  onPause: () => void;
-  onCancel: () => void;
+  onResume: (u: UploadView) => void;
+  onPause: (u: UploadView) => void;
+  onCancel: (u: UploadView) => void;
 }) {
   const pct = percent(u.bytesUploaded, u.size);
   const tone = u.state === 'waiting_network' || u.state === 'needs_file' ? 'amber' : 'blue';
@@ -176,26 +185,26 @@ function UploadCard({
       )}
       {u.state === 'error' && u.error && <p className="mt-2 text-xs text-red-400">{u.error}</p>}
       <div className="mt-3 flex gap-2">
-        {(u.state === 'uploading' || u.state === 'queued') && <Button onClick={onPause}>Pause</Button>}
+        {(u.state === 'uploading' || u.state === 'queued') && <Button onClick={() => onPause(u)}>Pause</Button>}
         {(u.state === 'paused' || u.state === 'error') && (
-          <Button kind="primary" onClick={onResume}>
+          <Button kind="primary" onClick={() => onResume(u)}>
             Resume
           </Button>
         )}
         {u.state === 'needs_file' && (
-          <Button kind="primary" onClick={onResume}>
+          <Button kind="primary" onClick={() => onResume(u)}>
             Re-select file
           </Button>
         )}
-        <Button kind="ghost" onClick={onCancel}>
+        <Button kind="ghost" onClick={() => onCancel(u)}>
           Cancel
         </Button>
       </div>
     </div>
   );
-}
+});
 
-function DownloadCard({ d, onNotice }: { d: DownloadView; onNotice: (s: string | null) => void }) {
+const DownloadCard = memo(function DownloadCard({ d, onNotice }: { d: DownloadView; onNotice: (s: string | null) => void }) {
   const pct = percent(d.bytesWritten, d.totalSize);
   return (
     <div className="rounded-2xl border border-white/8 bg-white/[0.04] p-4">
@@ -239,4 +248,4 @@ function DownloadCard({ d, onNotice }: { d: DownloadView; onNotice: (s: string |
       </div>
     </div>
   );
-}
+});

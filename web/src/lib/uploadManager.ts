@@ -68,6 +68,20 @@ interface ActiveState {
   samples: { t: number; bytes: number }[];
 }
 
+function sameUploadView(a: UploadView, b: UploadView): boolean {
+  return (
+    a.state === b.state &&
+    a.bytesUploaded === b.bytesUploaded &&
+    a.partsDone === b.partsDone &&
+    a.speedBps === b.speedBps &&
+    a.etaSeconds === b.etaSeconds &&
+    a.error === b.error &&
+    a.filename === b.filename &&
+    a.size === b.size &&
+    a.totalParts === b.totalParts
+  );
+}
+
 /**
  * The upload engine. One file transfers at a time; within it up to
  * `concurrency` parts are in flight. Every completed part is persisted to
@@ -177,9 +191,16 @@ export class UploadManager {
     return () => this.listeners.delete(listener);
   }
 
+  // Structural sharing: a view object is only replaced when its data
+  // changes, so memoized rows skip re-rendering the other 599 uploads on
+  // every progress tick.
+  private viewCache = new Map<string, UploadView>();
+
   snapshot(): UploadView[] {
     const views: UploadView[] = [];
+    const seen = new Set<string>();
     for (const u of this.uploadsCache.values()) {
+      seen.add(u.localId);
       const done = this.partsDoneCache.get(u.localId) ?? new Set();
       const doneBytes = this.doneBytes(u, done);
       let inflightBytes = 0;
@@ -189,7 +210,7 @@ export class UploadManager {
         speedBps = this.currentSpeed();
       }
       const bytesUploaded = Math.min(doneBytes + inflightBytes, u.size);
-      views.push({
+      const next: UploadView = {
         localId: u.localId,
         filename: u.filename,
         size: u.size,
@@ -200,7 +221,17 @@ export class UploadManager {
         totalParts: u.totalParts,
         speedBps,
         etaSeconds: speedBps > 0 ? Math.round((u.size - bytesUploaded) / speedBps) : null,
-      });
+      };
+      const prev = this.viewCache.get(u.localId);
+      if (prev && sameUploadView(prev, next)) {
+        views.push(prev);
+      } else {
+        this.viewCache.set(u.localId, next);
+        views.push(next);
+      }
+    }
+    for (const key of this.viewCache.keys()) {
+      if (!seen.has(key)) this.viewCache.delete(key);
     }
     return views.sort((a, b) => a.localId.localeCompare(b.localId));
   }

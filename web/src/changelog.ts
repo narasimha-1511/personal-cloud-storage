@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.6.0',
+    date: '2026-08-31',
+    title: 'Fast with huge libraries',
+    changes: [
+      'Lists render only what is on screen — 600 videos scroll smoothly',
+      'Progress updates repaint just the transferring row, not the whole list',
+      'Queued uploads show as a count instead of hundreds of cards',
+    ],
+  },
+  {
     version: '1.5.0',
     date: '2026-08-31',
     title: 'Reload protection',

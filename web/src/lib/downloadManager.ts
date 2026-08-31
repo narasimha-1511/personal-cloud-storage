@@ -78,23 +78,42 @@ export class DownloadManager {
     return () => this.listeners.delete(listener);
   }
 
+  // Structural sharing: unchanged rows keep their identity so memoized
+  // components skip re-rendering them (see UploadManager.snapshot).
+  private viewCache = new Map<string, DownloadView>();
+
   snapshot(): DownloadView[] {
-    return [...this.cache.values()]
-      .map((d) => {
-        const a = this.active.get(d.videoId);
-        const speedBps = a ? this.speed(a) : 0;
-        return {
-          videoId: d.videoId,
-          filename: d.filename,
-          totalSize: d.totalSize,
-          bytesWritten: d.bytesWritten,
-          state: d.state,
-          error: d.error,
-          speedBps,
-          etaSeconds: speedBps > 0 ? Math.round((d.totalSize - d.bytesWritten) / speedBps) : null,
-        };
-      })
-      .sort((a, b) => a.filename.localeCompare(b.filename));
+    const views = [...this.cache.values()].map((d) => {
+      const a = this.active.get(d.videoId);
+      const speedBps = a ? this.speed(a) : 0;
+      const next: DownloadView = {
+        videoId: d.videoId,
+        filename: d.filename,
+        totalSize: d.totalSize,
+        bytesWritten: d.bytesWritten,
+        state: d.state,
+        error: d.error,
+        speedBps,
+        etaSeconds: speedBps > 0 ? Math.round((d.totalSize - d.bytesWritten) / speedBps) : null,
+      };
+      const prev = this.viewCache.get(d.videoId);
+      if (
+        prev &&
+        prev.state === next.state &&
+        prev.bytesWritten === next.bytesWritten &&
+        prev.speedBps === next.speedBps &&
+        prev.etaSeconds === next.etaSeconds &&
+        prev.error === next.error
+      ) {
+        return prev;
+      }
+      this.viewCache.set(d.videoId, next);
+      return next;
+    });
+    for (const key of this.viewCache.keys()) {
+      if (!this.cache.has(key)) this.viewCache.delete(key);
+    }
+    return views.sort((a, b) => a.filename.localeCompare(b.filename));
   }
 
   /** Starts (or restarts) a download. `handle` comes from showSaveFilePicker. */
