@@ -11,6 +11,8 @@ RUN npm run build
 
 # ---- runtime ----
 FROM node:22-slim
+# curl is required by Coolify's container healthcheck.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json ./
