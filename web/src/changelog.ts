@@ -14,6 +14,21 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '1.8.0',
+    date: '2026-08-31',
+    title: 'Dedup, bulk downloads & clarity',
+    changes: [
+      'Re-picking files is always safe: already-uploaded ones are skipped, interrupted ones resume',
+      'Editors: select videos → Download all into one folder, sequentially, fully resumable',
+      'Search, status filter, and sorting for big folders',
+      'Transfers shows a live overview: current file, speed, files left, time estimate',
+      'The active transfer sorts to the top — never buried under the queue',
+      'Retries are visible on the card instead of looking frozen',
+      'Small API calls now time out instead of silently freezing the queue',
+      'Registered-but-waiting videos show “Pending upload” instead of “Uploading”',
+    ],
+  },
+  {
     version: '1.7.1',
     date: '2026-08-31',
     title: 'Correct video counts',

@@ -44,7 +44,7 @@ export interface LocalPart {
   uploadedAt: number;
 }
 
-export type LocalDownloadState = 'downloading' | 'paused' | 'waiting_network' | 'done' | 'error';
+export type LocalDownloadState = 'queued' | 'downloading' | 'paused' | 'waiting_network' | 'done' | 'error';
 
 export interface LocalDownload {
   videoId: string;

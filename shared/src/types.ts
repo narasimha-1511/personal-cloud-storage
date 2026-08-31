@@ -108,8 +108,13 @@ export interface CreateUploadBatchRequest {
   files: { filename: string; size: number; mimeType: string }[];
 }
 
+/** One entry per requested file, in request order. */
+export type BatchUploadResult =
+  | ({ kind: 'created'; filename: string } & CreateUploadResponse)
+  | { kind: 'duplicate'; filename: string; videoId: string; status: VideoStatus };
+
 export interface CreateUploadBatchResponse {
-  uploads: (CreateUploadResponse & { filename: string })[];
+  results: BatchUploadResult[];
 }
 
 export interface UploadStatusBatchRequest {

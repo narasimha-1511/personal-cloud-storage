@@ -237,25 +237,57 @@ export class UploadManager {
   }
 
   async addFile(file: File, target: { projectId: string; folderId?: string | null }, handle?: FileSystemFileHandle): Promise<string> {
-    const [localId] = await this.addFiles([{ file, handle }], target);
-    return localId!;
+    const { localIds } = await this.addFiles([{ file, handle }], target);
+    if (localIds.length === 0) throw new Error(`${file.name} is already uploaded here`);
+    return localIds[0]!;
   }
 
   /**
-   * Registers any number of files in one server round-trip (chunked at 500)
-   * — a 600-video picker selection appears in the queue immediately instead
-   * of issuing 600 sequential requests. The R2 multipart upload for each
-   * file is created server-side only when it starts transferring.
+   * Registers any number of files in one server round-trip per 500 files.
+   * Files matching an interrupted upload at the same location are re-attached
+   * (resumed) instead of re-registered, and the server skips files that are
+   * already uploaded or uploading there — re-picking a whole gallery
+   * selection is always safe.
    */
   async addFiles(
     entries: { file: File; handle?: FileSystemFileHandle }[],
     target: { projectId: string; folderId?: string | null },
-  ): Promise<string[]> {
+  ): Promise<{ localIds: string[]; queued: number; resumed: number; skipped: number }> {
     const localIds: string[] = [];
+    let queued = 0;
+    let resumed = 0;
+    let skipped = 0;
+
+    // First pass: files that match an interrupted upload here resume it.
+    const fresh: typeof entries = [];
+    for (const entry of entries) {
+      const { file } = entry;
+      const match = [...this.uploadsCache.values()].find(
+        (u) =>
+          u.state === 'needs_file' &&
+          u.projectId === target.projectId &&
+          u.folderId === (target.folderId ?? null) &&
+          u.filename === file.name &&
+          u.size === file.size &&
+          u.lastModified === file.lastModified,
+      );
+      if (match) {
+        try {
+          await this.provideFile(match.localId, file);
+          localIds.push(match.localId);
+          resumed++;
+          continue;
+        } catch {
+          // fall through to normal registration
+        }
+      }
+      fresh.push(entry);
+    }
+
     const CHUNK = 500;
-    for (let i = 0; i < entries.length; i += CHUNK) {
-      const chunk = entries.slice(i, i + CHUNK);
-      const { uploads: created } = await this.api.createUploadBatch({
+    for (let i = 0; i < fresh.length; i += CHUNK) {
+      const chunk = fresh.slice(i, i + CHUNK);
+      const { results } = await this.api.createUploadBatch({
         projectId: target.projectId,
         folderId: target.folderId ?? null,
         files: chunk.map(({ file }) => ({
@@ -265,36 +297,44 @@ export class UploadManager {
         })),
       });
       const now = Date.now();
-      const rows: LocalUpload[] = chunk.map(({ file, handle }, idx) => ({
-        localId: `${now.toString(36)}-${(i + idx).toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        serverUploadId: created[idx]!.uploadId,
-        videoId: created[idx]!.videoId,
-        projectId: target.projectId,
-        folderId: target.folderId ?? null,
-        filename: file.name,
-        size: file.size,
-        lastModified: file.lastModified,
-        mimeType: file.type || 'application/octet-stream',
-        partSize: created[idx]!.partSize,
-        totalParts: created[idx]!.totalParts,
-        state: 'queued',
-        fileHandle: handle,
-        // preserve pick order across chunks
-        createdAt: now + i + idx,
-        updatedAt: now,
-      }));
-      await this.db.uploads.bulkPut(rows);
-      for (let idx = 0; idx < rows.length; idx++) {
-        const row = rows[idx]!;
+      const rows: LocalUpload[] = [];
+      for (let idx = 0; idx < chunk.length; idx++) {
+        const result = results[idx];
+        const { file, handle } = chunk[idx]!;
+        if (!result || result.kind === 'duplicate') {
+          skipped++;
+          continue;
+        }
+        const row: LocalUpload = {
+          localId: `${now.toString(36)}-${(i + idx).toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          serverUploadId: result.uploadId,
+          videoId: result.videoId,
+          projectId: target.projectId,
+          folderId: target.folderId ?? null,
+          filename: file.name,
+          size: file.size,
+          lastModified: file.lastModified,
+          mimeType: file.type || 'application/octet-stream',
+          partSize: result.partSize,
+          totalParts: result.totalParts,
+          state: 'queued',
+          fileHandle: handle,
+          // preserve pick order across chunks
+          createdAt: now + i + idx,
+          updatedAt: now,
+        };
+        rows.push(row);
         this.uploadsCache.set(row.localId, row);
         this.partsDoneCache.set(row.localId, new Set());
-        this.files.set(row.localId, chunk[idx]!.file);
+        this.files.set(row.localId, file);
         localIds.push(row.localId);
+        queued++;
       }
+      if (rows.length > 0) await this.db.uploads.bulkPut(rows);
       this.emit();
     }
     void this.schedule();
-    return localIds;
+    return { localIds, queued, resumed, skipped };
   }
 
   /** Re-attach the file after a reload. Identity must match exactly. */
@@ -622,6 +662,9 @@ export class UploadManager {
         // part is never uploaded again.
         this.active?.inflight.delete(partNumber);
         await this.recordPartDone(u.localId, partNumber, etag, blob.size);
+        if (this.uploadsCache.get(u.localId)?.error) {
+          await this.setUpload(u.localId, { error: undefined });
+        }
         this.consecutiveNetFailures = 0;
         this.consecutiveSuccesses++;
         // Server-side record is best-effort; R2 ListParts is authoritative.
@@ -641,6 +684,10 @@ export class UploadManager {
         this.consecutiveSuccesses = 0;
         if (kind === 'network') this.consecutiveNetFailures++;
         if (attempt < this.config.maxAttempts - 1) {
+          // Surface the retry so a struggling connection never looks frozen.
+          await this.setUpload(u.localId, {
+            error: `Part ${partNumber} failed (${message}) — retrying, attempt ${attempt + 2} of ${this.config.maxAttempts}`,
+          });
           await this.sleep(backoffMs(attempt, this.config.backoffBaseMs), signal);
         } else {
           return { ok: false, failure: { kind: 'network', message } };

@@ -23,6 +23,24 @@ export default function TransfersPage() {
   const activeUploads = uploads.filter((u) => u.state !== 'done' && u.state !== 'aborted');
   const finishedUploads = uploads.filter((u) => u.state === 'done' || u.state === 'aborted');
 
+  // The live transfer always sorts to the top — never buried under the queue.
+  const STATE_ORDER: Record<string, number> = {
+    uploading: 0,
+    completing: 1,
+    waiting_network: 2,
+    needs_file: 3,
+    error: 4,
+    paused: 5,
+    queued: 6,
+  };
+  const sortedActive = [...activeUploads].sort(
+    (a, b) => (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9) || a.localId.localeCompare(b.localId),
+  );
+  const current = sortedActive.find((u) => u.state === 'uploading' || u.state === 'completing');
+  const doneToday = finishedUploads.filter((u) => u.state === 'done').length;
+  const remainingBytes = activeUploads.reduce((s, u) => s + (u.size - u.bytesUploaded), 0);
+  const overallEta = current && current.speedBps > 0 ? Math.round(remainingBytes / current.speedBps) : null;
+
   // Stable handlers so memoized cards skip re-rendering on progress ticks.
   const onResume = useCallback((u: UploadView) => {
     if (u.state === 'needs_file') {
@@ -61,11 +79,29 @@ export default function TransfersPage() {
       <div className="space-y-6">
         {notice && <Notice text={notice} onDismiss={() => setNotice(null)} />}
 
+        {activeUploads.length > 0 && (
+          <div className="rounded-xl border border-blue-500/25 bg-blue-500/[0.06] p-4">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-blue-300/70">Overall</p>
+            <p className="mt-1.5 text-[13px] text-zinc-200 tabular-nums">
+              {activeUploads.length} file{activeUploads.length === 1 ? '' : 's'} to go
+              {doneToday > 0 && ` · ${doneToday} done`} · {formatBytes(remainingBytes)} left
+              {overallEta !== null && ` · ~${formatEta(overallEta)}`}
+            </p>
+            {current ? (
+              <p className="mt-1 truncate text-[12px] text-zinc-500 tabular-nums">
+                Now: {current.filename} · {percent(current.bytesUploaded, current.size)}% · {formatSpeed(current.speedBps)}
+              </p>
+            ) : (
+              <p className="mt-1 text-[12px] text-zinc-500">Nothing transferring right now — see the top card below for why.</p>
+            )}
+          </div>
+        )}
+
         <section>
           <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>
           <div className="space-y-2">
             <LazyList
-              items={activeUploads}
+              items={sortedActive}
               keyFor={(u) => u.localId}
               estimateHeight={160}
               renderItem={(u) => <UploadCard u={u} onResume={onResume} onPause={onPause} onCancel={onCancel} />}
@@ -193,6 +229,7 @@ const UploadCard = memo(function UploadCard({
           The app was reloaded. Re-select this exact file to continue from {pct}% — nothing is re-uploaded.
         </p>
       )}
+      {u.state === 'uploading' && u.error && <p className="mt-2 text-xs text-amber-300/90">{u.error}</p>}
       {u.state === 'error' && u.error && <p className="mt-2 text-xs text-red-400">{u.error}</p>}
       <div className="mt-3 flex gap-2">
         {(u.state === 'uploading' || u.state === 'queued') && <Button onClick={() => onPause(u)}>Pause</Button>}

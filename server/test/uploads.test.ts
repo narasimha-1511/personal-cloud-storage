@@ -211,16 +211,17 @@ describe('bulk registration (lazy multipart)', () => {
     }));
     const res = await t.app.request('/api/uploads/create-batch', post({ projectId, files }, cookie));
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { uploads: { uploadId: string; filename: string }[] };
-    expect(body.uploads).toHaveLength(300);
-    expect(body.uploads[0]!.filename).toBe('VID_1000.MP4');
+    const body = (await res.json()) as { results: { kind: string; uploadId: string; filename: string }[] };
+    expect(body.results).toHaveLength(300);
+    expect(body.results.every((r) => r.kind === 'created')).toBe(true);
+    expect(body.results[0]!.filename).toBe('VID_1000.MP4');
     // Nothing touched R2 yet.
     expect(t.r2.multiparts.size).toBe(0);
 
     // Batched status works and reports no uploaded parts.
     const status = await t.app.request(
       '/api/uploads/status-batch',
-      post({ uploadIds: body.uploads.slice(0, 200).map((u) => u.uploadId) }, cookie),
+      post({ uploadIds: body.results.slice(0, 200).map((u) => u.uploadId) }, cookie),
     );
     expect(status.status).toBe(200);
     const { statuses } = (await status.json()) as { statuses: { uploadedParts?: unknown[] }[] };
@@ -258,5 +259,63 @@ describe('bulk registration (lazy multipart)', () => {
     const { statuses } = (await res.json()) as { statuses: { error?: string }[] };
     expect(statuses[0]!.error).toBe('forbidden');
     expect(statuses[1]!.error).toBe('not_found');
+  });
+});
+
+describe('batch deduplication', () => {
+  it('skips files already uploaded or uploading at the same location', async () => {
+    const t = await createTestApp();
+    const cookie = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+
+    const first = await t.app.request(
+      '/api/uploads/create-batch',
+      post(
+        {
+          projectId,
+          files: [
+            { filename: 'done.mp4', size: PART, mimeType: 'video/mp4' },
+            { filename: 'partial.mp4', size: PART, mimeType: 'video/mp4' },
+          ],
+        },
+        cookie,
+      ),
+    );
+    const { results } = (await first.json()) as { results: { kind: string; uploadId?: string }[] };
+    expect(results.map((r) => r.kind)).toEqual(['created', 'created']);
+    // Complete the first one for real.
+    await uploadPart(t, cookie, results[0]!.uploadId!, 1, PART);
+    const complete = await t.app.request(`/api/uploads/${results[0]!.uploadId}/complete`, post(undefined, cookie));
+    expect(complete.status).toBe(200);
+
+    // Re-pick the same two files plus one new one.
+    const again = await t.app.request(
+      '/api/uploads/create-batch',
+      post(
+        {
+          projectId,
+          files: [
+            { filename: 'done.mp4', size: PART, mimeType: 'video/mp4' },
+            { filename: 'partial.mp4', size: PART, mimeType: 'video/mp4' },
+            { filename: 'new.mp4', size: PART, mimeType: 'video/mp4' },
+          ],
+        },
+        cookie,
+      ),
+    );
+    const second = (await again.json()) as { results: { kind: string; status?: string }[] };
+    expect(second.results.map((r) => r.kind)).toEqual(['duplicate', 'duplicate', 'created']);
+    expect(second.results[0]!.status).toBe('READY');
+    expect(second.results[1]!.status).toBe('UPLOADING');
+
+    // Same name+size in a DIFFERENT folder is not a duplicate.
+    const folderRes = await t.app.request(`/api/projects/${projectId}/folders`, post({ name: 'Other' }, cookie));
+    const { folder } = (await folderRes.json()) as { folder: { id: string } };
+    const other = await t.app.request(
+      '/api/uploads/create-batch',
+      post({ projectId, folderId: folder.id, files: [{ filename: 'done.mp4', size: PART, mimeType: 'video/mp4' }] }, cookie),
+    );
+    const third = (await other.json()) as { results: { kind: string }[] };
+    expect(third.results[0]!.kind).toBe('created');
   });
 });

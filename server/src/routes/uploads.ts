@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import type {
+  BatchUploadResult,
   CompleteUploadResponse,
   CreateUploadBatchResponse,
   CreateUploadResponse,
@@ -187,21 +188,39 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
     const target = await resolveTarget(body.data.projectId, body.data.folderId);
     if ('error' in target) return c.json({ error: target.error }, 404);
 
-    const out: CreateUploadBatchResponse['uploads'] = [];
+    const folderId = body.data.folderId ?? null;
+    const results: BatchUploadResult[] = [];
+    let duplicates = 0;
     for (const file of body.data.files) {
-      const result = await registerOne(
-        user.id,
-        body.data.projectId,
-        body.data.folderId ?? null,
-        target.project.slug,
-        target.folderSlug,
-        file,
-      );
+      // Dedup: the same file (name + size) already uploaded or in progress
+      // at this exact location is skipped, so re-picking a whole gallery
+      // selection never creates copies.
+      const existing = (
+        await db
+          .select({ id: videos.id, status: videos.status })
+          .from(videos)
+          .where(
+            and(
+              eq(videos.projectId, body.data.projectId),
+              folderId ? eq(videos.folderId, folderId) : isNull(videos.folderId),
+              eq(videos.originalFilename, file.filename),
+              eq(videos.size, file.size),
+              inArray(videos.status, ['READY', 'UPLOADING']),
+            ),
+          )
+          .limit(1)
+      )[0];
+      if (existing) {
+        duplicates++;
+        results.push({ kind: 'duplicate', filename: file.filename, videoId: existing.id, status: existing.status });
+        continue;
+      }
+      const result = await registerOne(user.id, body.data.projectId, folderId, target.project.slug, target.folderSlug, file);
       if ('error' in result) return c.json({ error: result.error }, 400);
-      out.push({ ...result, filename: file.filename });
+      results.push({ kind: 'created', filename: file.filename, ...result });
     }
-    log({ op: 'upload.create_batch', ok: true, userId: user.id, count: out.length });
-    return c.json({ uploads: out } satisfies CreateUploadBatchResponse, 201);
+    log({ op: 'upload.create_batch', ok: true, userId: user.id, count: results.length, duplicates });
+    return c.json({ results } satisfies CreateUploadBatchResponse, 201);
   });
 
   /**

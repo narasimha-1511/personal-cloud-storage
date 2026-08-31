@@ -68,7 +68,22 @@ export class MockBackend {
       this.apiCalls++;
       this.checkNetwork();
       return {
-        uploads: body.files.map((f) => ({ ...this.register(f), filename: f.filename })),
+        results: body.files.map((f) => {
+          // Same dedup rule as the real server: name+size already present.
+          const dupe = [...this.uploads.entries()].find(
+            ([, u]) =>
+              u.status !== 'ABORTED' && u.size === f.size && u.key.endsWith(`-${f.filename}`),
+          );
+          if (dupe) {
+            return {
+              kind: 'duplicate' as const,
+              filename: f.filename,
+              videoId: `vid-${dupe[0]}`,
+              status: dupe[1].status === 'COMPLETED' ? ('READY' as const) : ('UPLOADING' as const),
+            };
+          }
+          return { kind: 'created' as const, filename: f.filename, ...this.register(f) };
+        }),
       };
     },
 

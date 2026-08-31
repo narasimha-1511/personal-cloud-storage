@@ -316,10 +316,11 @@ describe('bulk add', () => {
       makeFile(backend.partSize, `VID_${2000 + i}.MP4`),
     );
     const before = backend.apiCalls;
-    const localIds = await mgr.addFiles(files.map((file) => ({ file })), { projectId: 'p1' });
+    const { localIds, queued } = await mgr.addFiles(files.map((file) => ({ file })), { projectId: 'p1' });
     // Registration is one batched call, not one per file.
     expect(backend.apiCalls - before).toBe(1);
     expect(localIds).toHaveLength(100);
+    expect(queued).toBe(100);
     // Everything is visible in the queue immediately.
     expect(mgr.snapshot()).toHaveLength(100);
 
@@ -344,5 +345,50 @@ describe('render performance', () => {
     expect(during).toBe(before);
     await waitFor(() => stateOf(mgr, b)?.state === 'done', 5000, 'b done');
     expect(mgr.snapshot().find((v) => v.localId === a)!).toBe(before);
+  });
+});
+
+describe('deduplication and resume-on-repick', () => {
+  it('re-picking the same selection skips uploaded files and resumes interrupted ones', async () => {
+    const backend = new MockBackend();
+    const dbName = newDbName();
+    const fileA = makeFile(backend.partSize, 'A.MP4');
+    const fileB = makeFile(backend.partSize * 5, 'B.MP4');
+
+    // Session 1: A completes; B dies mid-upload; tab is killed.
+    {
+      const { mgr, db } = makeManager(backend, dbName);
+      await mgr.init();
+      const a = await mgr.addFile(fileA, { projectId: 'p1' });
+      await waitFor(() => stateOf(mgr, a)?.state === 'done', 5000, 'A done');
+      backend.failPutsAfter = backend.putsReceived.length + 2; // B gets 2 parts then dies
+      const b = await mgr.addFile(fileB, { projectId: 'p1' });
+      await waitFor(() => stateOf(mgr, b)?.state === 'waiting_network', 5000, 'B waiting');
+      mgr.dispose();
+      db.close();
+    }
+    backend.failPutsAfter = -1;
+
+    // Session 2: the user just picks BOTH files again via Add videos.
+    const { mgr } = makeManager(backend, dbName);
+    await mgr.init();
+    const uploadsBefore = backend.uploads.size;
+    const result = await mgr.addFiles(
+      [{ file: makeFile(backend.partSize, 'A.MP4') }, { file: makeFile(backend.partSize * 5, 'B.MP4') }],
+      { projectId: 'p1' },
+    );
+    // A is a server-side duplicate (already READY); B resumed its old upload.
+    expect(result.skipped).toBe(1);
+    expect(result.resumed).toBe(1);
+    expect(result.queued).toBe(0);
+    expect(backend.uploads.size).toBe(uploadsBefore); // no new registrations
+
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 5000, 'all done');
+    // B's first 2 parts were never re-uploaded.
+    const counts = new Map<number, number>();
+    for (const p of backend.putsReceived.filter((x) => x.uploadId === 'srv-2')) {
+      counts.set(p.partNumber, (counts.get(p.partNumber) ?? 0) + 1);
+    }
+    for (let n = 1; n <= 5; n++) expect(counts.get(n), `part ${n}`).toBe(1);
   });
 });

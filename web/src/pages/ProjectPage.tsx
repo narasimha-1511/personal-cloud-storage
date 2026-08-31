@@ -66,6 +66,11 @@ export default function ProjectPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  // filters
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'READY' | 'UPLOADING'>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'name'>('newest');
+
   const fileInput = useRef<HTMLInputElement>(null);
   const uploads = useUploads();
   const startedHere = useRef(new Map<string, string>());
@@ -116,18 +121,56 @@ export default function ProjectPage() {
   async function addFiles(files: FileList) {
     setNotice(null);
     try {
-      // One batched request registers the whole selection at once.
-      const localIds = await uploadManager.addFiles(
+      // One batched request; duplicates are skipped and interrupted uploads
+      // matching a picked file resume instead of re-registering.
+      const result = await uploadManager.addFiles(
         Array.from(files).map((file) => ({ file })),
         { projectId, folderId },
       );
-      for (const localId of localIds) {
+      for (const localId of result.localIds) {
         startedHere.current.set(localId, `${projectId}:${folderId ?? ''}`);
       }
-      showToast(`${localIds.length} upload${localIds.length === 1 ? '' : 's'} queued`);
+      const parts: string[] = [];
+      if (result.queued > 0) parts.push(`${result.queued} queued`);
+      if (result.resumed > 0) parts.push(`${result.resumed} resumed`);
+      if (result.skipped > 0) parts.push(`${result.skipped} already uploaded — skipped`);
+      showToast(parts.length > 0 ? parts.join(' · ') : 'Nothing to upload');
       load();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not start uploads');
+    }
+  }
+
+  async function downloadSelected() {
+    const ready = selectedVideos.filter((v) => v.status === 'READY');
+    if (ready.length === 0) {
+      setNotice('None of the selected videos are ready to download yet.');
+      return;
+    }
+    try {
+      if ('showDirectoryPicker' in window) {
+        const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+        const { downloadManager } = await import('../lib/managers');
+        await downloadManager.startBatch(
+          ready.map((v) => ({ id: v.id, displayName: v.displayName, size: v.size })),
+          dir,
+        );
+        showToast(`${ready.length} download${ready.length === 1 ? '' : 's'} queued — track in Transfers`);
+      } else {
+        // Fallback: hand each file to the browser's own download manager.
+        for (const v of ready) {
+          const { url } = await api.downloadUrl(v.id);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = v.displayName;
+          a.click();
+        }
+        showToast(`${ready.length} download${ready.length === 1 ? '' : 's'} handed to the browser`);
+      }
+      exitSelect();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      setNotice(err instanceof Error ? err.message : 'Could not start downloads');
     }
   }
 
@@ -147,8 +190,31 @@ export default function ProjectPage() {
     setSelected(new Set());
   }
 
+  const isSelectable = useCallback(
+    (v: VideoInfo) => canModify(v) || v.status === 'READY',
+    [canModify],
+  );
   const selectedVideos = (videos ?? []).filter((v) => selected.has(v.id));
-  const selectableCount = (videos ?? []).filter(canModify).length;
+  const selectableCount = (videos ?? []).filter(isSelectable).length;
+  const allModifiable = selectedVideos.length > 0 && selectedVideos.every(canModify);
+  const readySelected = selectedVideos.filter((v) => v.status === 'READY').length;
+
+  const q = query.trim().toLowerCase();
+  const filteredVideos = (videos ?? [])
+    .filter((v) => (statusFilter === 'all' ? true : v.status === statusFilter))
+    .filter((v) => (q ? v.displayName.toLowerCase().includes(q) : true))
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'oldest':
+          return a.createdAt.localeCompare(b.createdAt);
+        case 'largest':
+          return b.size - a.size;
+        case 'name':
+          return a.displayName.localeCompare(b.displayName);
+        default:
+          return b.createdAt.localeCompare(a.createdAt);
+      }
+    });
 
   async function doMove(targets: VideoInfo[], target: string | null, targetName: string) {
     setMoving(null);
@@ -286,10 +352,46 @@ export default function ProjectPage() {
           </div>
 
           {videos === null && <Spinner />}
+          {videos !== null && videos.length >= 8 && (
+            <div className="mb-3 space-y-2">
+              <input
+                className="h-9 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-[13px] text-zinc-100 placeholder-zinc-600 outline-none transition-colors focus:border-blue-500/60"
+                placeholder="Search videos…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <select
+                  className="h-9 flex-1 rounded-lg border border-white/10 bg-black/30 px-2 text-[12px] text-zinc-300 outline-none"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                >
+                  <option value="all">All statuses</option>
+                  <option value="READY">Ready</option>
+                  <option value="UPLOADING">Pending upload</option>
+                </select>
+                <select
+                  className="h-9 flex-1 rounded-lg border border-white/10 bg-black/30 px-2 text-[12px] text-zinc-300 outline-none"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="largest">Largest first</option>
+                  <option value="name">By name</option>
+                </select>
+              </div>
+              {(q || statusFilter !== 'all') && (
+                <p className="text-[11px] text-zinc-600 tabular-nums">
+                  {filteredVideos.length} of {videos.length} videos
+                </p>
+              )}
+            </div>
+          )}
           <div className="space-y-2">
             {videos && (
               <LazyList
-                items={videos}
+                items={filteredVideos}
                 keyFor={(v) => v.id}
                 estimateHeight={74}
                 renderItem={(v) => (
@@ -297,7 +399,7 @@ export default function ProjectPage() {
                     v={v}
                     selectMode={selectMode}
                     isSelected={selected.has(v.id)}
-                    selectable={canModify(v)}
+                    selectable={isSelectable(v)}
                     onToggle={onRowToggle}
                     onMenu={setVideoMenu}
                     onPlay={onRowPlay}
@@ -315,12 +417,15 @@ export default function ProjectPage() {
       {/* selection action bar / upload button */}
       {selectMode ? (
         <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-30 border-t border-white/[0.06] bg-[#0e0e11]/95 backdrop-blur">
-          <div className="mx-auto flex max-w-lg gap-2.5 px-4 py-3">
-            <Button full disabled={selected.size === 0} onClick={() => setMoving(selectedVideos)}>
+          <div className="mx-auto flex max-w-lg gap-2 px-4 py-3">
+            <Button full kind="primary" disabled={readySelected === 0} onClick={() => void downloadSelected()}>
+              <IconDownload size={16} /> Download{readySelected > 0 ? ` (${readySelected})` : ''}
+            </Button>
+            <Button full disabled={!allModifiable} onClick={() => setMoving(selectedVideos)}>
               <IconFolderMove size={16} /> Move
             </Button>
-            <Button full kind="danger" disabled={selected.size === 0} onClick={() => setDeletingVideos(selectedVideos)}>
-              <IconTrash size={16} /> Delete{selected.size > 0 ? ` (${selected.size})` : ''}
+            <Button full kind="danger" disabled={!allModifiable} onClick={() => setDeletingVideos(selectedVideos)}>
+              <IconTrash size={16} />
             </Button>
           </div>
         </div>

@@ -64,13 +64,82 @@ export class DownloadManager {
   async init(): Promise<void> {
     for (const d of await this.db.downloads.toArray()) {
       this.cache.set(d.videoId, d);
-      if (d.state === 'downloading') {
-        // We were killed mid-download; it needs a user gesture to reopen the
-        // file handle, so surface it as paused.
+      if (d.state === 'downloading' || d.state === 'queued') {
+        // We were killed mid-batch; file handles need a user gesture to
+        // reopen, so surface these as paused (Resume re-requests permission).
         await this.patch(d.videoId, { state: 'paused' });
       }
     }
     this.emit();
+  }
+
+  /**
+   * Queues many videos into one target directory (File System Access API)
+   * and downloads them sequentially, each fully resumable. Re-running a
+   * batch re-queues interrupted entries against their existing files
+   * instead of starting over.
+   */
+  async startBatch(
+    videos: { id: string; displayName: string; size: number }[],
+    dir: FileSystemDirectoryHandle,
+  ): Promise<void> {
+    for (const v of videos) {
+      const existing = this.cache.get(v.id);
+      if (existing && existing.state !== 'done' && existing.fileHandle) {
+        await this.patch(v.id, { state: 'queued', error: undefined });
+        continue;
+      }
+      const name = await this.uniqueName(dir, v.displayName);
+      const handle = await dir.getFileHandle(name, { create: true });
+      const record: LocalDownload = {
+        videoId: v.id,
+        filename: name,
+        totalSize: v.size,
+        bytesWritten: 0,
+        state: 'queued',
+        fileHandle: handle,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      this.cache.set(v.id, record);
+      await this.db.downloads.put(record);
+    }
+    this.emit();
+    void this.processQueue();
+  }
+
+  private processing = false;
+
+  private async processQueue(): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
+    try {
+      for (;;) {
+        const next = [...this.cache.values()]
+          .filter((d) => d.state === 'queued')
+          .sort((a, b) => a.createdAt - b.createdAt)[0];
+        if (!next) break;
+        await this.patch(next.videoId, { state: 'downloading' });
+        // A failed entry ends in waiting_network/error and the queue moves on.
+        await this.run(next.videoId);
+      }
+    } finally {
+      this.processing = false;
+    }
+  }
+
+  /** Avoids silently overwriting an unrelated same-named file in the folder. */
+  private async uniqueName(dir: FileSystemDirectoryHandle, desired: string): Promise<string> {
+    let name = desired;
+    for (let i = 2; ; i++) {
+      try {
+        await dir.getFileHandle(name);
+      } catch {
+        return name; // no such file — name is free
+      }
+      const dot = desired.lastIndexOf('.');
+      name = dot > 0 ? `${desired.slice(0, dot)} (${i})${desired.slice(dot)}` : `${desired} (${i})`;
+    }
   }
 
   onChange(listener: () => void): () => void {

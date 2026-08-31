@@ -38,9 +38,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     res = await fetch(path, {
       credentials: 'same-origin',
       headers: init?.body ? { 'content-type': 'application/json' } : undefined,
+      // Mobile networks can black-hole a request without ever failing it; an
+      // un-timed-out call here would silently freeze the whole upload queue.
+      signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(20_000) : undefined,
       ...init,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new TransferError('network', 'Request timed out');
+    }
     throw new TransferError('network', 'Network error');
   }
   if (!res.ok) {

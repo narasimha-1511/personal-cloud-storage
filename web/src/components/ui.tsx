@@ -87,7 +87,9 @@ const CHIP: Record<string, { cls: string; label: string; busy?: boolean }> = {
   error: { cls: 'text-red-400', label: 'Failed' },
   aborted: { cls: 'text-zinc-500', label: 'Cancelled' },
   READY: { cls: 'text-emerald-400', label: 'Ready' },
-  UPLOADING: { cls: 'text-blue-400', label: 'Uploading', busy: true },
+  // A video record exists from the moment it is picked; the actual transfer
+  // is tracked in Transfers. "Uploading" on hundreds of rows reads as stuck.
+  UPLOADING: { cls: 'text-zinc-400', label: 'Pending upload' },
   FAILED: { cls: 'text-red-400', label: 'Failed' },
   ABORTED: { cls: 'text-zinc-500', label: 'Cancelled' },
 };
