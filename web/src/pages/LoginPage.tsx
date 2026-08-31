@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useAuth } from '../auth';
 import { Button, Field, inputClass } from '../components/ui';
+import { IconLogo } from '../components/icons';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -23,14 +24,14 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-[#070b14] p-6">
+    <main className="flex min-h-dvh items-center justify-center bg-[#0a0a0c] p-6">
       <form onSubmit={onSubmit} className="w-full max-w-sm space-y-5">
         <div className="mb-8 text-center">
-          <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-400 text-2xl shadow-xl shadow-sky-500/30">
-            ▶
+          <span className="mx-auto mb-4 flex w-fit items-center justify-center text-zinc-100">
+            <IconLogo size={44} />
           </span>
-          <h1 className="text-xl font-bold tracking-tight text-slate-100">Video Vault</h1>
-          <p className="mt-1 text-sm text-slate-500">Original footage, safely transferred</p>
+          <h1 className="text-xl font-bold tracking-tight text-zinc-100">Video Vault</h1>
+          <p className="mt-1 text-sm text-zinc-500">Original footage, safely transferred</p>
         </div>
         <Field label="Username">
           <input

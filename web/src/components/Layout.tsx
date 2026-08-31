@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { useDownloads, useUploads } from '../lib/managers';
 import { Sheet, SheetAction } from './ui';
+import { IconChevronLeft, IconLibrary, IconLogo, IconLogout, IconTransfers, IconUsers } from './icons';
 
 const ACTIVE_UPLOAD_STATES = ['queued', 'uploading', 'completing', 'waiting_network', 'paused', 'needs_file'];
 const ACTIVE_DOWNLOAD_STATES = ['downloading', 'paused', 'waiting_network'];
@@ -18,26 +19,26 @@ export default function Layout({ children, title, back }: { children: ReactNode;
     downloads.filter((d) => ACTIVE_DOWNLOAD_STATES.includes(d.state)).length;
 
   return (
-    <div className="flex min-h-dvh flex-col bg-[#070b14] text-slate-100">
-      <header className="sticky top-0 z-30 border-b border-white/5 bg-[#070b14]/90 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-lg items-center gap-3 px-4">
+    <div className="flex min-h-dvh flex-col bg-[#0a0a0c] text-zinc-100">
+      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[#0a0a0c]/95 pt-[env(safe-area-inset-top)] backdrop-blur">
+        <div className="mx-auto flex h-[52px] max-w-lg items-center gap-2.5 px-4">
           {back !== undefined ? (
             <button
               onClick={() => navigate(back)}
-              className="-ml-2 flex h-9 w-9 items-center justify-center rounded-full text-xl text-slate-300 transition-colors hover:bg-white/8"
+              className="-ml-2.5 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
               aria-label="Back"
             >
-              ‹
+              <IconChevronLeft size={20} />
             </button>
           ) : (
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-cyan-400 text-xs shadow-lg shadow-sky-500/30">
-              ▶
+            <span className="text-zinc-100">
+              <IconLogo size={22} />
             </span>
           )}
-          <h1 className="min-w-0 flex-1 truncate text-[17px] font-bold tracking-tight">{title ?? 'Video Vault'}</h1>
+          <h1 className="min-w-0 flex-1 truncate text-[16px] font-semibold tracking-tight">{title ?? 'Video Vault'}</h1>
           <button
             onClick={() => setMenuOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-sm font-bold text-sky-300"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-[12px] font-semibold text-zinc-300 transition-colors hover:bg-white/10"
             aria-label="Account"
           >
             {user?.username.slice(0, 1).toUpperCase()}
@@ -47,27 +48,27 @@ export default function Layout({ children, title, back }: { children: ReactNode;
 
       <main className="mx-auto w-full max-w-lg flex-1 px-4 pb-28 pt-4">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/5 bg-[#0a0f1c]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.06] bg-[#0e0e11]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
         <div className="mx-auto flex max-w-lg items-stretch">
-          <Tab to="/" label="Library" icon="🗂" end />
-          <Tab to="/transfers" label="Transfers" icon="⇅" badge={activeCount || undefined} />
+          <Tab to="/" label="Library" icon={<IconLibrary size={21} />} end />
+          <Tab to="/transfers" label="Transfers" icon={<IconTransfers size={21} />} badge={activeCount || undefined} />
         </div>
       </nav>
 
       <Sheet open={menuOpen} onClose={() => setMenuOpen(false)}>
         <div className="mb-4 flex items-center gap-3 px-1">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-cyan-400 text-base font-bold text-white">
+          <span className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-[14px] font-semibold text-zinc-200">
             {user?.username.slice(0, 1).toUpperCase()}
           </span>
           <div>
-            <p className="text-sm font-bold">{user?.username}</p>
-            <p className="text-xs text-slate-500">{user?.role === 'admin' ? 'Administrator' : 'Member'}</p>
+            <p className="text-[14px] font-semibold">{user?.username}</p>
+            <p className="text-[12px] text-zinc-500">{user?.role === 'admin' ? 'Administrator' : 'Member'}</p>
           </div>
         </div>
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           {user?.role === 'admin' && (
             <SheetAction
-              icon="👥"
+              icon={<IconUsers size={18} />}
               label="Manage users"
               sub="Create accounts, reset passwords"
               onClick={() => {
@@ -76,26 +77,26 @@ export default function Layout({ children, title, back }: { children: ReactNode;
               }}
             />
           )}
-          <SheetAction icon="↩" label="Sign out" onClick={() => void logout()} />
+          <SheetAction icon={<IconLogout size={18} />} label="Sign out" onClick={() => void logout()} />
         </div>
       </Sheet>
     </div>
   );
 }
 
-function Tab({ to, label, icon, badge, end }: { to: string; label: string; icon: string; badge?: number; end?: boolean }) {
+function Tab({ to, label, icon, badge, end }: { to: string; label: string; icon: ReactNode; badge?: number; end?: boolean }) {
   return (
     <NavLink
       to={to}
       end={end}
       className={({ isActive }) =>
-        `relative flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition-colors ${isActive ? 'text-sky-400' : 'text-slate-500 hover:text-slate-300'}`
+        `relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[10.5px] font-medium transition-colors ${isActive ? 'text-zinc-100' : 'text-zinc-600 hover:text-zinc-400'}`
       }
     >
-      <span className="relative text-xl leading-none">
+      <span className="relative">
         {icon}
         {badge !== undefined && (
-          <span className="absolute -right-3 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-sky-500 px-1 text-[10px] font-bold text-white">
+          <span className="absolute -right-2.5 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-blue-500 px-1 text-[9px] font-bold text-white">
             {badge}
           </span>
         )}

@@ -6,6 +6,7 @@ import { formatBytes, formatDate } from '../lib/format';
 import { startVideoDownload } from '../lib/startDownload';
 import Layout from '../components/Layout';
 import { Button, Notice, Spinner } from '../components/ui';
+import { IconDownload } from '../components/icons';
 
 export default function PlayerPage() {
   const { id } = useParams<{ id: string }>();
@@ -36,7 +37,7 @@ export default function PlayerPage() {
         )}
         {video && (
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-500 tabular-nums">
+            <p className="text-xs text-zinc-500 tabular-nums">
               {formatBytes(video.size)} · original quality · {formatDate(video.createdAt)}
             </p>
             <Button
@@ -51,18 +52,18 @@ export default function PlayerPage() {
                   .catch((err) => setError(err instanceof Error ? err.message : 'Download failed'))
               }
             >
-              ⬇ Download
+              <IconDownload size={16} /> Download
             </Button>
           </div>
         )}
-        <p className="text-xs leading-relaxed text-slate-600">
+        <p className="text-xs leading-relaxed text-zinc-600">
           Playback streams the untouched original. A high-bitrate 4K file may stutter on slow connections — the download is
           always bit-exact regardless.
         </p>
       </div>
       {toast && (
         <div className="fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4">
-          <span className="rounded-full border border-white/10 bg-[#0d1424] px-4 py-2 text-xs font-semibold text-slate-200 shadow-xl">{toast}</span>
+          <span className="rounded-lg border border-white/10 bg-[#18181b] px-4 py-2.5 text-[12px] font-medium text-zinc-200">{toast}</span>
         </div>
       )}
     </Layout>

@@ -11,8 +11,8 @@ function Shell() {
   const { user, loading } = useAuth();
   if (loading) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[#070b14]">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/10 border-t-sky-400" />
+      <main className="flex min-h-dvh items-center justify-center bg-[#0a0a0c]">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/10 border-t-blue-500" />
       </main>
     );
   }

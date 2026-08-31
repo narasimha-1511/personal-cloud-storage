@@ -5,6 +5,7 @@ import type { UploadView } from '../lib/uploadManager';
 import type { DownloadView } from '../lib/downloadManager';
 import Layout from '../components/Layout';
 import { Button, ConfirmSheet, EmptyState, Notice, ProgressBar, StatusChip } from '../components/ui';
+import { IconTransfers } from '../components/icons';
 
 export default function TransfersPage() {
   const uploads = useUploads();
@@ -48,7 +49,7 @@ export default function TransfersPage() {
         {notice && <Notice text={notice} onDismiss={() => setNotice(null)} />}
 
         <section>
-          <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-500">Uploads</h2>
+          <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>
           <div className="space-y-2">
             {activeUploads.map((u) => (
               <UploadCard
@@ -68,13 +69,13 @@ export default function TransfersPage() {
             ))}
           </div>
           {activeUploads.length === 0 && (
-            <EmptyState icon="⇧" title="No active uploads" sub="Add videos from any project in the Library." />
+            <EmptyState icon={<IconTransfers size={28} />} title="No active uploads" sub="Add videos from any project in the Library." />
           )}
         </section>
 
         {downloads.length > 0 && (
           <section>
-            <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-500">Downloads</h2>
+            <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Downloads</h2>
             <div className="space-y-2">
               {downloads.map((d) => (
                 <DownloadCard key={d.videoId} d={d} onNotice={setNotice} />
@@ -85,18 +86,18 @@ export default function TransfersPage() {
 
         {finishedUploads.length > 0 && (
           <section>
-            <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-500">Finished</h2>
+            <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Finished</h2>
             <div className="space-y-2">
               {finishedUploads.map((u) => (
                 <div key={u.localId} className="flex items-center justify-between gap-3 rounded-2xl border border-white/6 bg-white/[0.03] px-4 py-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-slate-300">{u.filename}</p>
-                    <p className="text-[11px] text-slate-600 tabular-nums">{formatBytes(u.size)}</p>
+                    <p className="truncate text-sm font-medium text-zinc-300">{u.filename}</p>
+                    <p className="text-[11px] text-zinc-600 tabular-nums">{formatBytes(u.size)}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <StatusChip state={u.state} />
                     <button
-                      className="text-xs text-slate-600 hover:text-slate-300"
+                      className="text-xs text-zinc-600 hover:text-zinc-300"
                       onClick={() => void uploadManager.remove(u.localId)}
                     >
                       Clear
@@ -147,7 +148,7 @@ function UploadCard({
   onCancel: () => void;
 }) {
   const pct = percent(u.bytesUploaded, u.size);
-  const tone = u.state === 'waiting_network' || u.state === 'needs_file' ? 'amber' : 'sky';
+  const tone = u.state === 'waiting_network' || u.state === 'needs_file' ? 'amber' : 'blue';
   return (
     <div className="rounded-2xl border border-white/8 bg-white/[0.04] p-4">
       <div className="mb-2.5 flex items-center justify-between gap-2">
@@ -155,7 +156,7 @@ function UploadCard({
         <StatusChip state={u.state} />
       </div>
       <ProgressBar value={pct} tone={tone} />
-      <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-[11px] text-slate-500">
+      <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-[11px] text-zinc-500">
         <span className="tabular-nums">
           {formatBytes(u.bytesUploaded)} / {formatBytes(u.size)} · {pct}% · part {Math.min(u.partsDone + 1, u.totalParts)} of {u.totalParts}
         </span>
@@ -202,8 +203,8 @@ function DownloadCard({ d, onNotice }: { d: DownloadView; onNotice: (s: string |
         <p className="min-w-0 truncate text-sm font-semibold">{d.filename}</p>
         <StatusChip state={d.state} />
       </div>
-      <ProgressBar value={pct} tone={d.state === 'done' ? 'emerald' : d.state === 'waiting_network' ? 'amber' : 'sky'} />
-      <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-[11px] text-slate-500">
+      <ProgressBar value={pct} tone={d.state === 'done' ? 'emerald' : d.state === 'waiting_network' ? 'amber' : 'blue'} />
+      <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-[11px] text-zinc-500">
         <span className="tabular-nums">
           {formatBytes(d.bytesWritten)} / {formatBytes(d.totalSize)} · {pct}%
         </span>

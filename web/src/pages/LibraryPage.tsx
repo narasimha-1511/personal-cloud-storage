@@ -6,6 +6,7 @@ import { formatDate } from '../lib/format';
 import { useAuth } from '../auth';
 import Layout from '../components/Layout';
 import { Button, ConfirmSheet, EmptyState, InputSheet, Notice, Sheet, SheetAction, Spinner } from '../components/ui';
+import { IconChevronRight, IconFolder, IconLibrary, IconMore, IconPencil, IconTrash } from '../components/icons';
 
 export default function LibraryPage() {
   const { user } = useAuth();
@@ -28,39 +29,34 @@ export default function LibraryPage() {
 
   return (
     <Layout title="Library">
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {notice && <Notice text={notice} onDismiss={() => setNotice(null)} />}
         {projects === null && <Spinner />}
 
         {projects?.map((p) => (
-          <div key={p.id} className="group relative">
-            <button
-              onClick={() => navigate(`/p/${p.id}`)}
-              className="block w-full rounded-2xl border border-white/8 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5 text-left transition-all hover:border-white/15 active:scale-[0.99]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <span className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/25 to-cyan-400/10 text-lg">
-                    ⛰
-                  </span>
-                  <p className="truncate text-base font-bold">{p.name}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {p.videoCount} video{p.videoCount === 1 ? '' : 's'}
-                    {p.folderCount > 0 && ` · ${p.folderCount} folder${p.folderCount === 1 ? '' : 's'}`}
-                    {' · '}
-                    {formatDate(p.createdAt)}
-                  </p>
-                </div>
-                <span className="mt-1 text-slate-600">›</span>
-              </div>
+          <div key={p.id} className="flex items-center rounded-xl border border-white/[0.08] bg-white/[0.03] transition-colors hover:bg-white/[0.05]">
+            <button onClick={() => navigate(`/p/${p.id}`)} className="flex min-w-0 flex-1 items-center gap-3.5 p-4 text-left">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-zinc-400">
+                <IconFolder size={19} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold">{p.name}</span>
+                <span className="mt-0.5 block text-[12px] text-zinc-500">
+                  {p.videoCount} video{p.videoCount === 1 ? '' : 's'}
+                  {p.folderCount > 0 && ` · ${p.folderCount} folder${p.folderCount === 1 ? '' : 's'}`}
+                  {' · '}
+                  {formatDate(p.createdAt)}
+                </span>
+              </span>
+              {!isAdmin && <IconChevronRight size={16} className="shrink-0 text-zinc-700" />}
             </button>
             {isAdmin && (
               <button
                 onClick={() => setMenuFor(p)}
-                className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-white/10 hover:text-slate-200"
+                className="mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-white/[0.06] hover:text-zinc-300"
                 aria-label={`Options for ${p.name}`}
               >
-                ⋯
+                <IconMore size={18} />
               </button>
             )}
           </div>
@@ -68,16 +64,18 @@ export default function LibraryPage() {
 
         {projects?.length === 0 && (
           <EmptyState
-            icon="⛰"
+            icon={<IconLibrary size={32} />}
             title="No projects yet"
             sub={isAdmin ? 'Create your first project — one per trip works well.' : 'Ask your admin to create a project.'}
           />
         )}
 
         {isAdmin && projects !== null && (
-          <Button full size="lg" onClick={() => setCreating(true)}>
-            + New project
-          </Button>
+          <div className="pt-1">
+            <Button full size="lg" onClick={() => setCreating(true)}>
+              New project
+            </Button>
+          </div>
         )}
       </div>
 
@@ -94,9 +92,9 @@ export default function LibraryPage() {
       />
 
       <Sheet open={menuFor !== null} onClose={() => setMenuFor(null)} title={menuFor?.name}>
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           <SheetAction
-            icon="✏️"
+            icon={<IconPencil size={18} />}
             label="Rename"
             onClick={() => {
               setRenaming(menuFor);
@@ -104,7 +102,7 @@ export default function LibraryPage() {
             }}
           />
           <SheetAction
-            icon="🗑"
+            icon={<IconTrash size={18} />}
             label="Delete project"
             sub={menuFor && menuFor.videoCount > 0 ? `Deletes ${menuFor.videoCount} video(s) from storage` : 'Project is empty'}
             danger
