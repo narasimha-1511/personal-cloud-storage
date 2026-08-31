@@ -108,19 +108,19 @@ export default function ProjectPage() {
 
   async function addFiles(files: FileList) {
     setNotice(null);
-    let started = 0;
-    for (const file of Array.from(files)) {
-      try {
-        const localId = await uploadManager.addFile(file, { projectId, folderId });
+    try {
+      // One batched request registers the whole selection at once.
+      const localIds = await uploadManager.addFiles(
+        Array.from(files).map((file) => ({ file })),
+        { projectId, folderId },
+      );
+      for (const localId of localIds) {
         startedHere.current.set(localId, `${projectId}:${folderId ?? ''}`);
-        started++;
-      } catch (err) {
-        setNotice(`${file.name}: ${err instanceof Error ? err.message : 'could not start upload'}`);
       }
-    }
-    if (started > 0) {
-      showToast(`${started} upload${started === 1 ? '' : 's'} started`);
+      showToast(`${localIds.length} upload${localIds.length === 1 ? '' : 's'} queued`);
       load();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not start uploads');
     }
   }
 

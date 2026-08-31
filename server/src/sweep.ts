@@ -20,7 +20,9 @@ export async function sweepStaleUploads(db: Db, r2: R2Client | null, staleDays =
     .where(and(eq(uploads.status, 'IN_PROGRESS'), lt(uploads.updatedAt, cutoff)));
 
   for (const { upload, video } of stale) {
-    await r2.abortMultipartUpload(video.objectKey, upload.r2UploadId).catch(() => {});
+    if (upload.r2UploadId) {
+      await r2.abortMultipartUpload(video.objectKey, upload.r2UploadId).catch(() => {});
+    }
     const now = new Date().toISOString();
     await db.update(uploads).set({ status: 'ABORTED', updatedAt: now }).where(eq(uploads.id, upload.id));
     await db.update(videos).set({ status: 'ABORTED', updatedAt: now }).where(eq(videos.id, video.id));

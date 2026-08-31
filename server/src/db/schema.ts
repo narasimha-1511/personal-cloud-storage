@@ -77,7 +77,9 @@ export const uploads = sqliteTable(
     videoId: text('video_id')
       .notNull()
       .references(() => videos.id, { onDelete: 'cascade' }),
-    r2UploadId: text('r2_upload_id').notNull(),
+    // Null until the first part is signed: the R2 multipart upload is
+    // created lazily so registering hundreds of files stays instant.
+    r2UploadId: text('r2_upload_id'),
     partSize: integer('part_size').notNull(),
     totalParts: integer('total_parts').notNull(),
     status: text('status', { enum: ['IN_PROGRESS', 'COMPLETED', 'ABORTED'] }).notNull(),

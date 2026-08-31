@@ -1,4 +1,10 @@
-import type { CreateUploadResponse, UploadStatusResponse } from '@videovault/shared';
+import type {
+  CreateUploadBatchRequest,
+  CreateUploadBatchResponse,
+  CreateUploadResponse,
+  UploadStatusBatchResponse,
+  UploadStatusResponse,
+} from '@videovault/shared';
 import type { LocalUpload, VaultDb } from './db';
 import { TransferError, backoffMs, isRetryable } from './network';
 import type { PartTransport } from './transport';
@@ -13,7 +19,9 @@ export interface UploadApi {
     projectId: string;
     folderId?: string | null;
   }): Promise<CreateUploadResponse>;
+  createUploadBatch(body: CreateUploadBatchRequest): Promise<CreateUploadBatchResponse>;
   uploadStatus(id: string): Promise<UploadStatusResponse>;
+  uploadStatusBatch(uploadIds: string[]): Promise<UploadStatusBatchResponse>;
   signPart(id: string, partNumber: number): Promise<{ url: string }>;
   partDone(id: string, partNumber: number, etag: string, size: number): Promise<unknown>;
   completeUpload(id: string): Promise<unknown>;
@@ -106,32 +114,43 @@ export class UploadManager {
       this.partsDoneCache.set(u.localId, done);
     }
 
-    for (const u of all) {
-      if (u.state === 'done' || u.state === 'aborted' || u.state === 'error') continue;
+    // Reconcile all pending uploads with the server in batched calls — with
+    // hundreds of queued files this must not be one request per upload.
+    const pending = all.filter((u) => u.state !== 'done' && u.state !== 'aborted' && u.state !== 'error');
+    const byServerId = new Map(pending.map((u) => [u.serverUploadId, u]));
+    const CHUNK = 200;
+    for (let i = 0; i < pending.length; i += CHUNK) {
+      const chunk = pending.slice(i, i + CHUNK);
       try {
-        const status = await this.api.uploadStatus(u.serverUploadId);
-        if (status.status === 'COMPLETED') {
-          await this.setUpload(u.localId, { state: 'done' });
-          continue;
+        const { statuses } = await this.api.uploadStatusBatch(chunk.map((u) => u.serverUploadId));
+        for (const status of statuses) {
+          const u = byServerId.get(status.uploadId);
+          if (!u) continue;
+          if ('error' in status) {
+            await this.setUpload(u.localId, { state: 'error', error: 'Upload no longer exists on the server' });
+            continue;
+          }
+          if (status.status === 'COMPLETED') {
+            await this.setUpload(u.localId, { state: 'done' });
+            continue;
+          }
+          if (status.status === 'ABORTED') {
+            await this.setUpload(u.localId, { state: 'aborted' });
+            continue;
+          }
+          // Merge the authoritative part list into local state.
+          for (const p of status.uploadedParts) {
+            await this.recordPartDone(u.localId, p.partNumber, p.etag, p.size, false);
+          }
+          await this.setUpload(u.localId, { state: 'needs_file' });
+          await this.tryReattachHandle(u.localId);
         }
-        if (status.status === 'ABORTED') {
-          await this.setUpload(u.localId, { state: 'aborted' });
-          continue;
-        }
-        // Merge the authoritative part list into local state.
-        for (const p of status.uploadedParts) {
-          await this.recordPartDone(u.localId, p.partNumber, p.etag, p.size, false);
-        }
-        await this.setUpload(u.localId, { state: 'needs_file' });
-        await this.tryReattachHandle(u.localId);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 404) {
-          await this.setUpload(u.localId, { state: 'error', error: 'Upload no longer exists on the server' });
-        } else {
-          // Offline right now; leave recoverable and retry on connectivity.
+      } catch {
+        // Offline right now; leave recoverable and retry on connectivity.
+        for (const u of chunk) {
           await this.setUpload(u.localId, { state: 'waiting_network' });
-          this.armHeartbeat();
         }
+        this.armHeartbeat();
       }
     }
 
@@ -187,38 +206,64 @@ export class UploadManager {
   }
 
   async addFile(file: File, target: { projectId: string; folderId?: string | null }, handle?: FileSystemFileHandle): Promise<string> {
-    const created = await this.api.createUpload({
-      filename: file.name,
-      size: file.size,
-      mimeType: file.type || 'application/octet-stream',
-      projectId: target.projectId,
-      folderId: target.folderId ?? null,
-    });
-    const now = Date.now();
-    const upload: LocalUpload = {
-      localId: `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      serverUploadId: created.uploadId,
-      videoId: created.videoId,
-      projectId: target.projectId,
-      folderId: target.folderId ?? null,
-      filename: file.name,
-      size: file.size,
-      lastModified: file.lastModified,
-      mimeType: file.type || 'application/octet-stream',
-      partSize: created.partSize,
-      totalParts: created.totalParts,
-      state: 'queued',
-      fileHandle: handle,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.db.uploads.put(upload);
-    this.uploadsCache.set(upload.localId, upload);
-    this.partsDoneCache.set(upload.localId, new Set());
-    this.files.set(upload.localId, file);
-    this.emit();
+    const [localId] = await this.addFiles([{ file, handle }], target);
+    return localId!;
+  }
+
+  /**
+   * Registers any number of files in one server round-trip (chunked at 500)
+   * — a 600-video picker selection appears in the queue immediately instead
+   * of issuing 600 sequential requests. The R2 multipart upload for each
+   * file is created server-side only when it starts transferring.
+   */
+  async addFiles(
+    entries: { file: File; handle?: FileSystemFileHandle }[],
+    target: { projectId: string; folderId?: string | null },
+  ): Promise<string[]> {
+    const localIds: string[] = [];
+    const CHUNK = 500;
+    for (let i = 0; i < entries.length; i += CHUNK) {
+      const chunk = entries.slice(i, i + CHUNK);
+      const { uploads: created } = await this.api.createUploadBatch({
+        projectId: target.projectId,
+        folderId: target.folderId ?? null,
+        files: chunk.map(({ file }) => ({
+          filename: file.name,
+          size: file.size,
+          mimeType: file.type || 'application/octet-stream',
+        })),
+      });
+      const now = Date.now();
+      const rows: LocalUpload[] = chunk.map(({ file, handle }, idx) => ({
+        localId: `${now.toString(36)}-${(i + idx).toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        serverUploadId: created[idx]!.uploadId,
+        videoId: created[idx]!.videoId,
+        projectId: target.projectId,
+        folderId: target.folderId ?? null,
+        filename: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        mimeType: file.type || 'application/octet-stream',
+        partSize: created[idx]!.partSize,
+        totalParts: created[idx]!.totalParts,
+        state: 'queued',
+        fileHandle: handle,
+        // preserve pick order across chunks
+        createdAt: now + i + idx,
+        updatedAt: now,
+      }));
+      await this.db.uploads.bulkPut(rows);
+      for (let idx = 0; idx < rows.length; idx++) {
+        const row = rows[idx]!;
+        this.uploadsCache.set(row.localId, row);
+        this.partsDoneCache.set(row.localId, new Set());
+        this.files.set(row.localId, chunk[idx]!.file);
+        localIds.push(row.localId);
+      }
+      this.emit();
+    }
     void this.schedule();
-    return upload.localId;
+    return localIds;
   }
 
   /** Re-attach the file after a reload. Identity must match exactly. */

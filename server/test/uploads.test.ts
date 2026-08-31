@@ -198,3 +198,65 @@ describe('multipart upload lifecycle', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('bulk registration (lazy multipart)', () => {
+  it('registers 300 files in one call with zero R2 round-trips', async () => {
+    const t = await createTestApp();
+    const cookie = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+    const files = Array.from({ length: 300 }, (_, i) => ({
+      filename: `VID_${1000 + i}.MP4`,
+      size: PART + i,
+      mimeType: 'video/mp4',
+    }));
+    const res = await t.app.request('/api/uploads/create-batch', post({ projectId, files }, cookie));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { uploads: { uploadId: string; filename: string }[] };
+    expect(body.uploads).toHaveLength(300);
+    expect(body.uploads[0]!.filename).toBe('VID_1000.MP4');
+    // Nothing touched R2 yet.
+    expect(t.r2.multiparts.size).toBe(0);
+
+    // Batched status works and reports no uploaded parts.
+    const status = await t.app.request(
+      '/api/uploads/status-batch',
+      post({ uploadIds: body.uploads.slice(0, 200).map((u) => u.uploadId) }, cookie),
+    );
+    expect(status.status).toBe(200);
+    const { statuses } = (await status.json()) as { statuses: { uploadedParts?: unknown[] }[] };
+    expect(statuses).toHaveLength(200);
+    expect(statuses.every((s) => Array.isArray(s.uploadedParts) && s.uploadedParts.length === 0)).toBe(true);
+  });
+
+  it('creates the R2 multipart exactly once, on first sign-part', async () => {
+    const t = await createTestApp();
+    const cookie = await t.loginAs('narasimha', 'admin');
+    const { uploadId } = await createUpload(t, cookie, { size: PART });
+    expect(t.r2.multiparts.size).toBe(0);
+    await t.app.request(`/api/uploads/${uploadId}/sign-part`, post({ partNumber: 1 }, cookie));
+    expect(t.r2.multiparts.size).toBe(1);
+    await t.app.request(`/api/uploads/${uploadId}/sign-part`, post({ partNumber: 1 }, cookie));
+    expect(t.r2.multiparts.size).toBe(1);
+  });
+
+  it('completing an upload that never transferred reports every part missing', async () => {
+    const t = await createTestApp();
+    const cookie = await t.loginAs('narasimha', 'admin');
+    const { uploadId } = await createUpload(t, cookie); // 3 parts, never signed
+    const res = await t.app.request(`/api/uploads/${uploadId}/complete`, post(undefined, cookie));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { missingParts: number[] };
+    expect(body.missingParts).toEqual([1, 2, 3]);
+  });
+
+  it('status-batch enforces per-upload access', async () => {
+    const t = await createTestApp();
+    const owner = await t.loginAs('narasimha', 'admin');
+    const other = await t.loginAs('editor', 'user');
+    const { uploadId } = await createUpload(t, owner);
+    const res = await t.app.request('/api/uploads/status-batch', post({ uploadIds: [uploadId, 'nope'] }, other));
+    const { statuses } = (await res.json()) as { statuses: { error?: string }[] };
+    expect(statuses[0]!.error).toBe('forbidden');
+    expect(statuses[1]!.error).toBe('not_found');
+  });
+});

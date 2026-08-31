@@ -305,3 +305,25 @@ describe('resume across restart (the core invariant)', () => {
     expect(stateOf(mgr, localId)?.state).toBe('done');
   });
 });
+
+describe('bulk add', () => {
+  it('queues 100 picked files with a single registration request and uploads them all', async () => {
+    const backend = new MockBackend();
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+
+    const files = Array.from({ length: 100 }, (_, i) =>
+      makeFile(backend.partSize, `VID_${2000 + i}.MP4`),
+    );
+    const before = backend.apiCalls;
+    const localIds = await mgr.addFiles(files.map((file) => ({ file })), { projectId: 'p1' });
+    // Registration is one batched call, not one per file.
+    expect(backend.apiCalls - before).toBe(1);
+    expect(localIds).toHaveLength(100);
+    // Everything is visible in the queue immediately.
+    expect(mgr.snapshot()).toHaveLength(100);
+
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 30_000, 'all 100 done');
+    expect([...backend.uploads.values()].every((u) => u.status === 'COMPLETED')).toBe(true);
+  });
+});

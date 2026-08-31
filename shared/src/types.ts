@@ -101,6 +101,25 @@ export interface CreateUploadResponse {
   totalParts: number;
 }
 
+/** Bulk registration: one request for a whole picker selection. */
+export interface CreateUploadBatchRequest {
+  projectId: string;
+  folderId?: string | null;
+  files: { filename: string; size: number; mimeType: string }[];
+}
+
+export interface CreateUploadBatchResponse {
+  uploads: (CreateUploadResponse & { filename: string })[];
+}
+
+export interface UploadStatusBatchRequest {
+  uploadIds: string[];
+}
+
+export interface UploadStatusBatchResponse {
+  statuses: (UploadStatusResponse | { uploadId: string; error: 'not_found' | 'forbidden' })[];
+}
+
 export interface UploadStatusResponse {
   uploadId: string;
   videoId: string;

@@ -40,20 +40,50 @@ export class MockBackend {
     if (this.networkDown) throw new TransferError('network', 'Network error');
   }
 
+  /** Counts API round-trips so tests can assert batching actually batches. */
+  apiCalls = 0;
+
+  private register(body: { filename: string; size: number }) {
+    const uploadId = `srv-${++this.counter}`;
+    const totalParts = Math.max(1, Math.ceil(body.size / this.partSize));
+    this.uploads.set(uploadId, {
+      key: `projects/test/raw/2026-08-31/${uploadId}-${body.filename}`,
+      size: body.size,
+      partSize: this.partSize,
+      totalParts,
+      status: 'IN_PROGRESS',
+      parts: new Map(),
+    });
+    return { uploadId, videoId: `vid-${uploadId}`, partSize: this.partSize, totalParts };
+  }
+
   api: UploadApi = {
     createUpload: async (body) => {
+      this.apiCalls++;
       this.checkNetwork();
-      const uploadId = `srv-${++this.counter}`;
-      const totalParts = Math.max(1, Math.ceil(body.size / this.partSize));
-      this.uploads.set(uploadId, {
-        key: `projects/test/raw/2026-08-31/${uploadId}-${body.filename}`,
-        size: body.size,
-        partSize: this.partSize,
-        totalParts,
-        status: 'IN_PROGRESS',
-        parts: new Map(),
-      });
-      return { uploadId, videoId: `vid-${uploadId}`, partSize: this.partSize, totalParts };
+      return this.register(body);
+    },
+
+    createUploadBatch: async (body) => {
+      this.apiCalls++;
+      this.checkNetwork();
+      return {
+        uploads: body.files.map((f) => ({ ...this.register(f), filename: f.filename })),
+      };
+    },
+
+    uploadStatusBatch: async (uploadIds) => {
+      this.apiCalls++;
+      this.checkNetwork();
+      const statuses = [];
+      for (const id of uploadIds) {
+        if (!this.uploads.has(id)) {
+          statuses.push({ uploadId: id, error: 'not_found' as const });
+        } else {
+          statuses.push(await this.api.uploadStatus(id));
+        }
+      }
+      return { statuses };
     },
 
     uploadStatus: async (id) => {

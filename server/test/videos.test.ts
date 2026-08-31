@@ -161,7 +161,12 @@ describe('videos', () => {
       '/api/uploads/create',
       post({ filename: 'mid.mp4', size: PART * 3, mimeType: 'video/mp4', projectId }, admin),
     );
-    const { videoId } = (await create.json()) as { videoId: string };
+    const { uploadId, videoId } = (await create.json()) as { uploadId: string; videoId: string };
+    // Registration alone creates nothing in R2 (lazy multipart)…
+    expect(t.r2.multiparts.size).toBe(0);
+    // …the first sign-part does.
+    const sign = await t.app.request(`/api/uploads/${uploadId}/sign-part`, post({ partNumber: 1 }, admin));
+    expect(sign.status).toBe(200);
     expect(t.r2.multiparts.size).toBe(1);
 
     const del = await t.app.request(`/api/videos/${videoId}/delete`, post(undefined, admin));

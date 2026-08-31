@@ -30,7 +30,9 @@ export async function deleteVideoStorage(
     .from(uploads)
     .where(and(eq(uploads.videoId, video.id), eq(uploads.status, 'IN_PROGRESS')));
   for (const u of live) {
-    await r2.abortMultipartUpload(video.objectKey, u.r2UploadId).catch(() => {});
+    if (u.r2UploadId) {
+      await r2.abortMultipartUpload(video.objectKey, u.r2UploadId).catch(() => {});
+    }
   }
   await r2.deleteObject(video.objectKey).catch(() => {});
 }
