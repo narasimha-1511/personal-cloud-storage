@@ -76,6 +76,7 @@ export default function ProjectPage() {
   // filters
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'READY' | 'UPLOADING'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'video' | 'image' | 'other'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'name'>('newest');
 
   // list/grid view (grid shows real photo thumbnails)
@@ -240,6 +241,12 @@ export default function ProjectPage() {
 
   const q = query.trim().toLowerCase();
   const filteredVideos = (videos ?? [])
+    .filter((v) => {
+      if (typeFilter === 'all') return true;
+      if (typeFilter === 'video') return v.mimeType.startsWith('video/');
+      if (typeFilter === 'image') return v.mimeType.startsWith('image/');
+      return !v.mimeType.startsWith('video/') && !v.mimeType.startsWith('image/');
+    })
     .filter((v) => (statusFilter === 'all' ? true : v.status === statusFilter))
     .filter((v) => (q ? v.displayName.toLowerCase().includes(q) : true))
     .sort((a, b) => {
@@ -398,9 +405,23 @@ export default function ProjectPage() {
                 </div>
               )}
               {selectMode ? (
-                <button onClick={exitSelect} className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100">
-                  Cancel
-                </button>
+                <>
+                  <button
+                    onClick={() => {
+                      const selectableIds = filteredVideos.filter(isSelectable).map((v) => v.id);
+                      const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+                      setSelected(allSelected ? new Set() : new Set(selectableIds));
+                    }}
+                    className="text-[12px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                  >
+                    {filteredVideos.filter(isSelectable).every((v) => selected.has(v.id)) && selected.size > 0
+                      ? 'Deselect all'
+                      : `Select all${typeFilter !== 'all' || statusFilter !== 'all' || q ? ' (filtered)' : ''}`}
+                  </button>
+                  <button onClick={exitSelect} className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100">
+                    Cancel
+                  </button>
+                </>
               ) : (
                 selectableCount > 0 && (
                   <button
@@ -415,7 +436,7 @@ export default function ProjectPage() {
           </div>
 
           {videos === null && <Spinner />}
-          {videos !== null && videos.length >= 8 && (
+          {videos !== null && videos.length >= 4 && (
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
               <input
                 className="h-9 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-[13px] text-zinc-100 placeholder-zinc-600 outline-none transition-colors focus:border-blue-500/60 sm:max-w-xs"
@@ -424,6 +445,16 @@ export default function ProjectPage() {
                 onChange={(e) => setQuery(e.target.value)}
               />
               <div className="flex flex-1 gap-2">
+                <select
+                  className="h-9 flex-1 rounded-lg border border-white/10 bg-black/30 px-2 text-[12px] text-zinc-300 outline-none"
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
+                >
+                  <option value="all">All types</option>
+                  <option value="video">Videos</option>
+                  <option value="image">Photos</option>
+                  <option value="other">Other files</option>
+                </select>
                 <select
                   className="h-9 flex-1 rounded-lg border border-white/10 bg-black/30 px-2 text-[12px] text-zinc-300 outline-none"
                   value={statusFilter}
@@ -444,7 +475,7 @@ export default function ProjectPage() {
                   <option value="name">By name</option>
                 </select>
               </div>
-              {(q || statusFilter !== 'all') && (
+              {(q || statusFilter !== 'all' || typeFilter !== 'all') && (
                 <p className="text-[11px] text-zinc-600 tabular-nums">
                   {filteredVideos.length} of {videos.length} videos
                 </p>

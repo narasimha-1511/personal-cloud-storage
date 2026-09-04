@@ -14,6 +14,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.2.0',
+    date: '2026-09-04',
+    title: 'Select all & type filters',
+    changes: [
+      'Filter a folder by Videos, Photos, or Other files',
+      'Select all (respects active filters) — then Download, Move, or Delete the lot',
+    ],
+  },
+  {
     version: '2.1.0',
     date: '2026-09-04',
     title: 'A real desktop experience',
