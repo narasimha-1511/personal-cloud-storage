@@ -30,7 +30,9 @@ import {
   IconFolderMove,
   IconHome,
   IconImage,
+  IconGrid,
   IconLink,
+  IconList,
   IconLock,
   IconMore,
   IconPencil,
@@ -75,6 +77,35 @@ export default function ProjectPage() {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'READY' | 'UPLOADING'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'name'>('newest');
+
+  // list/grid view (grid shows real photo thumbnails)
+  const [viewMode, setViewModeState] = useState<'list' | 'grid'>(() => {
+    try {
+      return localStorage.getItem('vv-viewmode') === 'grid' ? 'grid' : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  const setViewMode = (m: 'list' | 'grid') => {
+    setViewModeState(m);
+    try {
+      localStorage.setItem('vv-viewmode', m);
+    } catch {}
+  };
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (viewMode !== 'grid' || !videos) return;
+    const wanted = videos
+      .filter((v) => v.status === 'READY' && v.mimeType.startsWith('image/') && !thumbs[v.id])
+      .map((v) => v.id)
+      .slice(0, 200);
+    if (wanted.length === 0) return;
+    api
+      .viewUrls(wanted)
+      .then((r) => setThumbs((t) => ({ ...t, ...r.urls })))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, videos]);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const recordInput = useRef<HTMLInputElement>(null);
@@ -304,7 +335,7 @@ export default function ProjectPage() {
                 No folders yet — organize by day or camera, e.g. “Day 1”, “Drone”.
               </p>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
                 {folders.map((f) => (
                   <div
                     key={f.id}
@@ -347,32 +378,52 @@ export default function ProjectPage() {
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
               {selectMode ? `${selected.size} selected` : currentFolder ? 'Files' : 'Files in project root'}
             </h2>
-            {selectMode ? (
-              <button onClick={exitSelect} className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100">
-                Cancel
-              </button>
-            ) : (
-              selectableCount > 0 && (
-                <button
-                  onClick={() => setSelectMode(true)}
-                  className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100"
-                >
-                  Select
+            <div className="flex items-center gap-2.5">
+              {!selectMode && (videos?.length ?? 0) > 0 && (
+                <div className="flex rounded-md border border-white/10 bg-black/30 p-0.5">
+                  <button
+                    onClick={() => setViewMode('list')}
+                    aria-label="List view"
+                    className={`flex h-6 w-7 items-center justify-center rounded transition-colors ${viewMode === 'list' ? 'bg-white/10 text-zinc-200' : 'text-zinc-600 hover:text-zinc-400'}`}
+                  >
+                    <IconList size={13} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    aria-label="Grid view"
+                    className={`flex h-6 w-7 items-center justify-center rounded transition-colors ${viewMode === 'grid' ? 'bg-white/10 text-zinc-200' : 'text-zinc-600 hover:text-zinc-400'}`}
+                  >
+                    <IconGrid size={13} />
+                  </button>
+                </div>
+              )}
+              {selectMode ? (
+                <button onClick={exitSelect} className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100">
+                  Cancel
                 </button>
-              )
-            )}
+              ) : (
+                selectableCount > 0 && (
+                  <button
+                    onClick={() => setSelectMode(true)}
+                    className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100"
+                  >
+                    Select
+                  </button>
+                )
+              )}
+            </div>
           </div>
 
           {videos === null && <Spinner />}
           {videos !== null && videos.length >= 8 && (
-            <div className="mb-3 space-y-2">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
               <input
-                className="h-9 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-[13px] text-zinc-100 placeholder-zinc-600 outline-none transition-colors focus:border-blue-500/60"
-                placeholder="Search videos…"
+                className="h-9 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-[13px] text-zinc-100 placeholder-zinc-600 outline-none transition-colors focus:border-blue-500/60 sm:max-w-xs"
+                placeholder="Search files…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
-              <div className="flex gap-2">
+              <div className="flex flex-1 gap-2">
                 <select
                   className="h-9 flex-1 rounded-lg border border-white/10 bg-black/30 px-2 text-[12px] text-zinc-300 outline-none"
                   value={statusFilter}
@@ -400,23 +451,37 @@ export default function ProjectPage() {
               )}
             </div>
           )}
-          <div className="space-y-2">
+          <div className={viewMode === 'grid' ? 'grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'space-y-2'}>
             {videos && (
               <LazyList
                 items={filteredVideos}
                 keyFor={(v) => v.id}
-                estimateHeight={74}
-                renderItem={(v) => (
-                  <VideoRow
-                    v={v}
-                    selectMode={selectMode}
-                    isSelected={selected.has(v.id)}
-                    selectable={isSelectable(v)}
-                    onToggle={onRowToggle}
-                    onMenu={setVideoMenu}
-                    onPlay={onRowPlay}
-                  />
-                )}
+                estimateHeight={viewMode === 'grid' ? 120 : 74}
+                initial={viewMode === 'grid' ? 60 : 30}
+                renderItem={(v) =>
+                  viewMode === 'grid' ? (
+                    <GridTile
+                      v={v}
+                      thumb={thumbs[v.id]}
+                      selectMode={selectMode}
+                      isSelected={selected.has(v.id)}
+                      selectable={isSelectable(v)}
+                      onToggle={onRowToggle}
+                      onMenu={setVideoMenu}
+                      onPlay={onRowPlay}
+                    />
+                  ) : (
+                    <VideoRow
+                      v={v}
+                      selectMode={selectMode}
+                      isSelected={selected.has(v.id)}
+                      selectable={isSelectable(v)}
+                      onToggle={onRowToggle}
+                      onMenu={setVideoMenu}
+                      onPlay={onRowPlay}
+                    />
+                  )
+                }
               />
             )}
           </div>
@@ -428,8 +493,8 @@ export default function ProjectPage() {
 
       {/* selection action bar / upload button */}
       {selectMode ? (
-        <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-30 border-t border-white/[0.06] bg-[#0e0e11]/95 backdrop-blur">
-          <div className="mx-auto flex max-w-lg gap-2 px-4 py-3">
+        <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-30 border-t border-white/[0.06] bg-[#0e0e11]/95 backdrop-blur lg:bottom-0 lg:left-60">
+          <div className="mx-auto flex max-w-lg gap-2 px-4 py-3 lg:max-w-2xl">
             <Button full kind="primary" disabled={readySelected === 0} onClick={() => void downloadSelected()}>
               <IconDownload size={16} /> Download{readySelected > 0 ? ` (${readySelected})` : ''}
             </Button>
@@ -444,7 +509,7 @@ export default function ProjectPage() {
       ) : (
         <button
           onClick={() => setAddSheetOpen(true)}
-          className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-30 flex h-12 items-center gap-2 rounded-full bg-blue-600 pl-4 pr-5 text-[14px] font-semibold text-white transition-colors hover:bg-blue-500 active:opacity-90"
+          className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-30 flex h-12 items-center gap-2 rounded-full bg-blue-600 pl-4 pr-5 text-[14px] font-semibold text-white transition-colors hover:bg-blue-500 active:opacity-90 lg:bottom-8 lg:right-8"
         >
           <IconPlus size={18} /> Add
         </button>
@@ -947,3 +1012,79 @@ function FolderAccessSheet({
     </Sheet>
   );
 }
+
+
+const GridTile = memo(function GridTile({
+  v,
+  thumb,
+  selectMode,
+  isSelected,
+  selectable,
+  onToggle,
+  onMenu,
+  onPlay,
+}: {
+  v: VideoInfo;
+  thumb?: string;
+  selectMode: boolean;
+  isSelected: boolean;
+  selectable: boolean;
+  onToggle: (v: VideoInfo) => void;
+  onMenu: (v: VideoInfo) => void;
+  onPlay: (v: VideoInfo) => void;
+}) {
+  const isImage = v.mimeType.startsWith('image/');
+  const isVideo = v.mimeType.startsWith('video/');
+  return (
+    <div
+      className={`group relative aspect-square overflow-hidden rounded-lg border transition-colors ${
+        isSelected ? 'border-blue-500' : 'border-white/[0.08]'
+      } ${selectMode && !selectable ? 'opacity-40' : ''} bg-white/[0.03]`}
+    >
+      <button
+        className="block h-full w-full"
+        disabled={selectMode ? !selectable : v.status !== 'READY'}
+        onClick={() => (selectMode ? onToggle(v) : v.status === 'READY' ? onPlay(v) : onMenu(v))}
+        aria-label={v.displayName}
+      >
+        {thumb ? (
+          <img src={thumb} alt="" loading="lazy" className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center text-zinc-600">
+            {isImage ? <IconImage size={22} /> : isVideo ? <IconPlay size={22} /> : <IconFile size={22} />}
+          </span>
+        )}
+        <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1.5 py-1 text-left text-[10px] text-zinc-300">
+          {v.displayName}
+        </span>
+      </button>
+      {v.status !== 'READY' && (
+        <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-zinc-300">
+          Pending
+        </span>
+      )}
+      {v.hidden && !selectMode && (
+        <span className="absolute left-1.5 top-1.5 text-amber-400/90">
+          <IconEyeOff size={12} />
+        </span>
+      )}
+      {selectMode ? (
+        <span
+          className={`pointer-events-none absolute right-1.5 top-1.5 flex h-[20px] w-[20px] items-center justify-center rounded-full border ${
+            isSelected ? 'border-blue-500 bg-blue-500 text-white' : 'border-white/60 bg-black/40 text-transparent'
+          }`}
+        >
+          <IconCheck size={12} />
+        </span>
+      ) : (
+        <button
+          onClick={() => onMenu(v)}
+          className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-zinc-300 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+          aria-label={`Options for ${v.displayName}`}
+        >
+          <IconMore size={15} />
+        </button>
+      )}
+    </div>
+  );
+});

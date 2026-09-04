@@ -68,6 +68,31 @@ export function videoRoutes({ db, env, r2 }: VideoRouteDeps) {
     return c.json({ video: toVideoInfo(row.video, row.ownerUsername) });
   });
 
+  /**
+   * Signs view URLs for many files at once (thumbnail grids). Presigning is
+   * local HMAC work — no storage round-trips — so this is cheap even for a
+   * whole folder. Visibility is enforced per file.
+   */
+  app.post('/view-urls', async (c) => {
+    if (!r2) return c.json({ error: 'Object storage is not configured' }, 503);
+    const body = z
+      .object({ ids: z.array(z.string().min(1)).min(1).max(200) })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'Invalid request' }, 400);
+    const user = c.get('user');
+    const urls: Record<string, string> = {};
+    for (const id of [...new Set(body.data.ids)]) {
+      const row = await loadVideo(id);
+      if (!row || row.video.status !== 'READY') continue;
+      if (!(await canSeeVideo(db, user, row.video))) continue;
+      urls[id] = await r2.signGetUrl(row.video.objectKey, env.VIEW_URL_TTL_SECONDS, {
+        filename: row.video.displayName,
+        disposition: 'inline',
+      });
+    }
+    return c.json({ urls, expiresAt: new Date(Date.now() + env.VIEW_URL_TTL_SECONDS * 1000).toISOString() });
+  });
+
   app.post('/:id/set-hidden', async (c) => {
     const body = z.object({ hidden: z.boolean() }).safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'Invalid request' }, 400);

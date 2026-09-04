@@ -212,6 +212,26 @@ export const IconFile = (p: P) => (
   </Svg>
 );
 
+export const IconGrid = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </Svg>
+);
+
+export const IconList = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 6h13" />
+    <path d="M8 12h13" />
+    <path d="M8 18h13" />
+    <path d="M3 6h.01" />
+    <path d="M3 12h.01" />
+    <path d="M3 18h.01" />
+  </Svg>
+);
+
 export const IconEyeOff = (p: P) => (
   <Svg {...p}>
     <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />

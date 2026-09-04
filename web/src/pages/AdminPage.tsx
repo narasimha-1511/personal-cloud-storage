@@ -43,7 +43,7 @@ export default function AdminPage() {
 
   return (
     <Layout title="Manage users" back="/">
-      <div className="space-y-5">
+      <div className="mx-auto w-full space-y-5 lg:max-w-2xl">
         {notice && <Notice text={notice} onDismiss={() => setNotice(null)} />}
 
         <Card>

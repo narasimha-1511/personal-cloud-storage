@@ -76,7 +76,7 @@ export default function TransfersPage() {
 
   return (
     <Layout title="Transfers">
-      <div className="space-y-6">
+      <div className="mx-auto w-full space-y-6 lg:max-w-2xl">
         {notice && <Notice text={notice} onDismiss={() => setNotice(null)} />}
 
         {activeUploads.length > 0 && (

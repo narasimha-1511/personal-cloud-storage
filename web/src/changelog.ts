@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.1.0',
+    date: '2026-09-04',
+    title: 'A real desktop experience',
+    changes: [
+      'Sidebar navigation and wide layouts on desktop — no more phone app in the middle of the screen',
+      'Grid view with real photo thumbnails (toggle next to Select)',
+      'Projects and folders flow into multiple columns on bigger screens',
+      'Wider player and tidier Transfers/Users pages on desktop',
+    ],
+  },
+  {
     version: '2.0.0',
     date: '2026-08-31',
     title: 'Privacy controls',

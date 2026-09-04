@@ -50,7 +50,7 @@ export function LazyList<T>({
         </div>
       ))}
       {limit < items.length && (
-        <div ref={sentinelRef} className="py-3 text-center text-[12px] text-zinc-600">
+        <div ref={sentinelRef} style={{ gridColumn: '1 / -1' }} className="py-3 text-center text-[12px] text-zinc-600">
           {items.length - limit} more…
         </div>
       )}

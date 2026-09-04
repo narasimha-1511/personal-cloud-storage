@@ -126,6 +126,8 @@ export const api = {
   },
   getVideo: (id: string) => request<{ video: VideoInfo }>(`/api/videos/${id}`),
   viewUrl: (id: string) => request<SignedUrlResponse>(`/api/videos/${id}/view-url`, post()),
+  viewUrls: (ids: string[]) =>
+    request<{ urls: Record<string, string>; expiresAt: string }>('/api/videos/view-urls', post({ ids })),
   downloadUrl: (id: string) => request<SignedUrlResponse>(`/api/videos/${id}/download-url`, post()),
   renameVideo: (id: string, name: string) =>
     request<{ ok: true }>(`/api/videos/${id}/rename`, post({ name })),

@@ -122,3 +122,24 @@ describe('restricted folders', () => {
     expect(list.folders[0]!.createdByUsername).toBe('editor');
   });
 });
+
+describe('batch view urls', () => {
+  it('signs urls only for files the requester may see', async () => {
+    const t = await createTestApp();
+    const admin = await t.loginAs('narasimha', 'admin');
+    const member = await t.loginAs('editor', 'user');
+    const projectId = await t.seedProject();
+    const visible = await readyVideo(t, admin, projectId, 'open.png');
+    const secret = await readyVideo(t, admin, projectId, 'secret.png');
+    await t.app.request(`/api/videos/${secret}/set-hidden`, post({ hidden: true }, admin));
+
+    const res = await t.app.request('/api/videos/view-urls', post({ ids: [visible, secret, 'nope'] }, member));
+    expect(res.status).toBe(200);
+    const { urls } = (await res.json()) as { urls: Record<string, string> };
+    expect(Object.keys(urls)).toEqual([visible]);
+
+    const adminRes = await t.app.request('/api/videos/view-urls', post({ ids: [visible, secret] }, admin));
+    const adminUrls = (await adminRes.json()) as { urls: Record<string, string> };
+    expect(Object.keys(adminUrls.urls).sort()).toEqual([visible, secret].sort());
+  });
+});

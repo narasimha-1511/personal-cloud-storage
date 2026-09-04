@@ -38,7 +38,7 @@ export default function PlayerPage() {
       title={video?.displayName ?? 'Viewer'}
       back={video ? `/p/${video.projectId}${video.folderId ? `?f=${video.folderId}` : ''}` : '/'}
     >
-      <div className="space-y-4">
+      <div className="mx-auto w-full space-y-4 lg:max-w-4xl">
         {error && <Notice text={error} />}
         {!url && !error && <Spinner />}
         {url && kind === 'video' && (

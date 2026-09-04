@@ -43,6 +43,7 @@ export default function LibraryPage() {
         {notice && <Notice text={notice} onDismiss={() => setNotice(null)} />}
         {projects === null && <Spinner />}
 
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
         {projects?.map((p) => (
           <div key={p.id} className="flex items-center rounded-xl border border-white/[0.08] bg-white/[0.03] transition-colors hover:bg-white/[0.05]">
             <button onClick={() => navigate(`/p/${p.id}`)} className="flex min-w-0 flex-1 items-center gap-3.5 p-4 text-left">
@@ -71,6 +72,8 @@ export default function LibraryPage() {
             )}
           </div>
         ))}
+
+        </div>
 
         {projects?.length === 0 && (
           <EmptyState
