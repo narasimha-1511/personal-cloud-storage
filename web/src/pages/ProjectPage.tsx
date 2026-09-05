@@ -5,6 +5,7 @@ import type { FolderInfo, ProjectInfo, UserInfo, VideoInfo } from '@videovault/s
 import { api } from '../lib/api';
 import { ensureManagersInit, uploadManager, useUploads } from '../lib/managers';
 import { startVideoDownload } from '../lib/startDownload';
+import { filesFromDataTransfer } from '../lib/dropFiles';
 import { formatBytes, formatDate, formatEta, formatSpeed, percent } from '../lib/format';
 import { useAuth } from '../auth';
 import Layout from '../components/Layout';
@@ -112,6 +113,8 @@ export default function ProjectPage() {
   const recordInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const uploads = useUploads();
   const startedHere = useRef(new Map<string, string>());
   const hereKey = `${projectId}:${folderId ?? ''}`;
@@ -145,6 +148,48 @@ export default function ProjectPage() {
     load();
   }, [load]);
 
+  // Drag & drop anywhere on the page uploads into the current location.
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth.current++;
+      setDragging(true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setDragging(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      if (!e.dataTransfer) return;
+      void filesFromDataTransfer(e.dataTransfer).then((files) => {
+        if (files.length > 0) void addFiles(files);
+      });
+    };
+    window.addEventListener('dragenter', onDragEnter);
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter);
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragleave', onDragLeave);
+      window.removeEventListener('drop', onDrop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, folderId]);
+
   // Refresh when an upload completes so the new video flips to Ready.
   const doneCount = uploads.filter((u) => u.state === 'done').length;
   const prevDone = useRef(doneCount);
@@ -158,7 +203,7 @@ export default function ProjectPage() {
     setTimeout(() => setToast(null), 3000);
   }
 
-  async function addFiles(files: FileList) {
+  async function addFiles(files: FileList | File[]) {
     setNotice(null);
     try {
       // One batched request; duplicates are skipped and interrupted uploads
@@ -611,6 +656,18 @@ export default function ProjectPage() {
           />
         </div>
       </Sheet>
+
+      {dragging && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 lg:pl-[16.5rem]">
+          <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-blue-500/70 bg-blue-500/[0.08] px-8 py-14 text-center">
+            <IconDownload size={28} className="rotate-180 text-blue-400" />
+            <p className="text-[15px] font-semibold text-zinc-100">
+              Drop to upload to {currentFolder ? `“${currentFolder.name}”` : project?.name ?? 'this project'}
+            </p>
+            <p className="text-[12px] text-zinc-500">Files or whole folders — originals, resumable, duplicates skipped</p>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4">

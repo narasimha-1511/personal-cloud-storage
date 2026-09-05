@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.3.0',
+    date: '2026-09-05',
+    title: 'Drag & drop',
+    changes: [
+      'Drop files anywhere on a project or folder page to upload them right there',
+      'Dropping a whole folder uploads everything inside it',
+      'Same pipeline as always: originals, resumable, duplicates skipped',
+    ],
+  },
+  {
     version: '2.2.0',
     date: '2026-09-04',
     title: 'Select all & type filters',
