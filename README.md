@@ -4,6 +4,8 @@ Private, resumable raw-video transfer: record 4K on a phone in the mountains, up
 
 **Primary engineering principle: if the internet dies, nothing is lost.** Uploads and downloads always resume from where they stopped — never from zero.
 
+# ignore this command this is for the testing purpose 
+
 ---
 
 ## 1. Architecture
