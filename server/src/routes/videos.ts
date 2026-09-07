@@ -6,6 +6,7 @@ import type { Db } from '../db/index.js';
 import { folders, users, videos } from '../db/schema.js';
 import type { R2Client } from '../r2.js';
 import type { AuthVariables } from '../auth/middleware.js';
+import type { Thumbnailer } from '../thumbs.js';
 import type { Env } from '../env.js';
 import { log } from '../log.js';
 import { toVideoInfo } from './uploads.js';
@@ -16,9 +17,10 @@ export interface VideoRouteDeps {
   db: Db;
   env: Env;
   r2: R2Client | null;
+  thumbnailer: Thumbnailer;
 }
 
-export function videoRoutes({ db, env, r2 }: VideoRouteDeps) {
+export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
   const app = new Hono<{ Variables: AuthVariables }>();
 
   async function loadVideo(id: string) {
@@ -76,21 +78,41 @@ export function videoRoutes({ db, env, r2 }: VideoRouteDeps) {
   app.post('/view-urls', async (c) => {
     if (!r2) return c.json({ error: 'Object storage is not configured' }, 503);
     const body = z
-      .object({ ids: z.array(z.string().min(1)).min(1).max(200) })
+      .object({
+        ids: z.array(z.string().min(1)).min(1).max(200),
+        /** 'thumb' serves the small derivative used by grid tiles. */
+        variant: z.enum(['original', 'thumb']).default('original'),
+      })
       .safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'Invalid request' }, 400);
     const user = c.get('user');
+    const wantThumb = body.data.variant === 'thumb';
+
     const urls: Record<string, string> = {};
+    const visible: (typeof videos.$inferSelect)[] = [];
     for (const id of [...new Set(body.data.ids)]) {
       const row = await loadVideo(id);
       if (!row || row.video.status !== 'READY') continue;
       if (!(await canSeeVideo(db, user, row.video))) continue;
-      urls[id] = await r2.signGetUrl(row.video.objectKey, env.VIEW_URL_TTL_SECONDS, {
+      visible.push(row.video);
+
+      // A thumb when one exists; otherwise the original, so the tile still
+      // shows something while generation catches up.
+      const thumbKey = wantThumb ? thumbnailer.keyFor(row.video) : null;
+      urls[id] = await r2.signGetUrl(thumbKey ?? row.video.objectKey, env.VIEW_URL_TTL_SECONDS, {
         filename: row.video.displayName,
         disposition: 'inline',
       });
     }
-    return c.json({ urls, expiresAt: new Date(Date.now() + env.VIEW_URL_TTL_SECONDS * 1000).toISOString() });
+
+    // Kick off any missing derivatives and tell the client which ids are worth
+    // asking about again.
+    const pending = wantThumb ? thumbnailer.request(visible) : [];
+    return c.json({
+      urls,
+      pending,
+      expiresAt: new Date(Date.now() + env.VIEW_URL_TTL_SECONDS * 1000).toISOString(),
+    });
   });
 
   app.post('/:id/set-hidden', async (c) => {

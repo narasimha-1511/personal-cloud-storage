@@ -1,8 +1,10 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { LazyList } from '../components/LazyList';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import Lightbox from '../components/Lightbox';
+import { useParams, useSearchParams } from 'react-router-dom';
 import type { FolderInfo, ProjectInfo, UserInfo, VideoInfo } from '@videovault/shared';
 import { api } from '../lib/api';
+import { invalidateSiblings, pageKey, readPage, thumbsUsable, writePage } from '../lib/pageCache';
 import { ensureManagersInit, uploadManager, useUploads } from '../lib/managers';
 import { startVideoDownload } from '../lib/startDownload';
 import { filesFromDataTransfer } from '../lib/dropFiles';
@@ -50,7 +52,6 @@ export default function ProjectPage() {
   const { projectId = '' } = useParams();
   const [search, setSearch] = useSearchParams();
   const folderId = search.get('f');
-  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
@@ -74,6 +75,10 @@ export default function ProjectPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  // Viewer overlay. Held by id rather than index so the open/next handlers stay
+  // referentially stable and the memoized tiles do not re-render on every keystroke.
+  const [viewerId, setViewerId] = useState<string | null>(null);
+
   // filters
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'READY' | 'UPLOADING'>('all');
@@ -95,19 +100,17 @@ export default function ProjectPage() {
     } catch {}
   };
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
-  useEffect(() => {
-    if (viewMode !== 'grid' || !videos) return;
-    const wanted = videos
-      .filter((v) => v.status === 'READY' && v.mimeType.startsWith('image/') && !thumbs[v.id])
-      .map((v) => v.id)
-      .slice(0, 200);
-    if (wanted.length === 0) return;
-    api
-      .viewUrls(wanted)
-      .then((r) => setThumbs((t) => ({ ...t, ...r.urls })))
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, videos]);
+  const [thumbsExpireAt, setThumbsExpireAt] = useState(0);
+  /**
+   * Ids whose URL is a genuine thumbnail rather than the original standing in
+   * for one still being generated. The viewer uses this to avoid showing (and
+   * separately re-downloading) a multi-megabyte original as a "preview".
+   */
+  const [realThumbs, setRealThumbs] = useState<Set<string>>(new Set());
+  // Ids already asked for, so the effect never re-requests the same URL.
+  const thumbsRequested = useRef(new Set<string>());
+  // Bumped to force a fresh round after signed URLs expire.
+  const [thumbEpoch, setThumbEpoch] = useState(0);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const recordInput = useRef<HTMLInputElement>(null);
@@ -128,25 +131,177 @@ export default function ProjectPage() {
   const currentFolder = folders.find((f) => f.id === folderId) ?? null;
   const canModify = useCallback((v: VideoInfo) => isAdmin || v.ownerId === user?.id, [isAdmin, user?.id]);
 
-  const load = useCallback(() => {
-    api
-      .listProjects()
-      .then((r) => setProject(r.projects.find((p) => p.id === projectId) ?? null))
-      .catch(() => setNotice('Could not load — check your connection.'));
-    api.listFolders(projectId).then((r) => setFolders(r.folders)).catch(() => {});
-    api
-      .listVideos({ projectId, folderId: folderId ?? 'none' })
-      .then((r) => setVideos(r.videos))
-      .catch(() => setNotice('Could not load videos — check your connection.'));
+  // How far the windowed list has grown, hoisted here so it can be cached.
+  const defaultLimit = viewMode === 'grid' ? 60 : 30;
+  const [limit, setLimit] = useState(defaultLimit);
+
+  const cacheKey = pageKey(projectId, folderId);
+  // The location a response must still belong to before it is applied, so a
+  // slow request for the folder you just left cannot overwrite the new one.
+  const liveKey = useRef(cacheKey);
+  const pendingScroll = useRef<number | null>(null);
+  // True while the restore is stepping toward the saved offset, so the scroll
+  // listener does not record the clamped positions it passes through.
+  const restoring = useRef(false);
+
+  const load = useCallback(async () => {
+    const key = pageKey(projectId, folderId);
+    const [projectsRes, foldersRes, videosRes] = await Promise.allSettled([
+      api.listProjects(),
+      api.listFolders(projectId),
+      api.listVideos({ projectId, folderId: folderId ?? 'none' }),
+    ]);
+    const fresh = liveKey.current === key;
+
+    const proj =
+      projectsRes.status === 'fulfilled'
+        ? (projectsRes.value.projects.find((p) => p.id === projectId) ?? null)
+        : undefined;
+    const nextFolders = foldersRes.status === 'fulfilled' ? foldersRes.value.folders : undefined;
+    const nextVideos = videosRes.status === 'fulfilled' ? videosRes.value.videos : undefined;
+
+    if (fresh) {
+      if (proj !== undefined) setProject(proj);
+      if (nextFolders !== undefined) setFolders(nextFolders);
+      if (nextVideos !== undefined) setVideos(nextVideos);
+    }
+    // Cache under the key the request was made for, even if we navigated away —
+    // but never re-create an entry that was invalidated while this was in
+    // flight, or the stale counts would outlive the invalidation.
+    writePage(
+      key,
+      {
+        ...(proj !== undefined ? { project: proj } : {}),
+        ...(nextFolders !== undefined ? { folders: nextFolders } : {}),
+        ...(nextVideos !== undefined ? { videos: nextVideos } : {}),
+        fetchedAt: Date.now(),
+      },
+      { onlyIfPresent: !fresh },
+    );
+
+    if (fresh && videosRes.status === 'rejected') {
+      setNotice('Could not load files — check your connection.');
+    } else if (fresh && nextVideos !== undefined) {
+      setNotice(null);
+    }
   }, [projectId, folderId]);
 
+  /** Reload after a mutation, dropping sibling folders whose counts moved. */
+  const refresh = useCallback(() => {
+    invalidateSiblings(projectId, pageKey(projectId, folderId));
+    void load();
+  }, [projectId, folderId, load]);
+
+  // Paint from cache first, then revalidate. Restoring `videos` (rather than
+  // blanking to a spinner) is what keeps the scroll position meaningful.
   useEffect(() => {
     void ensureManagersInit();
-    setVideos(null);
+    liveKey.current = cacheKey;
     setSelectMode(false);
     setSelected(new Set());
-    load();
-  }, [load]);
+    setViewerId(null);
+    thumbsRequested.current = new Set();
+
+    const hit = readPage(cacheKey);
+    if (hit) {
+      setProject(hit.project);
+      setFolders(hit.folders);
+      setVideos(hit.videos);
+      const keepThumbs = thumbsUsable(hit);
+      setThumbs(keepThumbs ? hit.thumbs : {});
+      setThumbsExpireAt(keepThumbs ? hit.thumbsExpireAt : 0);
+      setRealThumbs(keepThumbs ? new Set(hit.realThumbs) : new Set());
+      // Only ids whose URL is a finished thumbnail are considered done; ones
+      // still standing in for a pending derivative must be asked about again.
+      if (keepThumbs) thumbsRequested.current = new Set(hit.realThumbs);
+      setLimit(hit.limit || defaultLimit);
+      pendingScroll.current = hit.scrollY;
+    } else {
+      setProject(null);
+      setFolders([]);
+      setVideos(null);
+      setThumbs({});
+      setThumbsExpireAt(0);
+      setRealThumbs(new Set());
+      setLimit(defaultLimit);
+      pendingScroll.current = 0;
+    }
+    void load();
+    // `defaultLimit` follows viewMode, which must not re-trigger a reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, load]);
+
+  // Put the user back where they were, once the restored rows are in the DOM.
+  //
+  // A single scrollTo is not enough and is actively harmful: `content-visibility`
+  // only gives a row its true height once it nears the viewport, so a freshly
+  // mounted document is much shorter than it will be and the browser clamps the
+  // jump. Each clamped landing unlocks more rows, so we step toward the target
+  // across frames while progress is still being made. `restoring` suppresses the
+  // scroll listener throughout — otherwise the clamped intermediate positions
+  // would be written straight over the saved one, permanently losing the place.
+  useLayoutEffect(() => {
+    if (pendingScroll.current === null || videos === null) return;
+    const y = pendingScroll.current;
+    pendingScroll.current = null;
+    if (y <= 0) return;
+
+    restoring.current = true;
+    let raf = 0;
+    let tries = 0;
+    let lastReached = -1;
+    const step = () => {
+      window.scrollTo(0, y);
+      const reached = window.scrollY;
+      tries++;
+      const arrived = Math.abs(reached - y) <= 2;
+      const stalled = reached === lastReached;
+      lastReached = reached;
+      if (!arrived && !stalled && tries < 40) {
+        raf = requestAnimationFrame(step);
+      } else {
+        restoring.current = false;
+        // Keep whatever we could actually reach, so the next visit is closer.
+        writePage(liveKey.current, { scrollY: reached });
+      }
+    };
+    step();
+    return () => {
+      cancelAnimationFrame(raf);
+      restoring.current = false;
+    };
+  }, [videos]);
+
+  // Track scroll for the cache. rAF-throttled so a fling costs one write a frame.
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (pendingScroll.current !== null || restoring.current) return;
+        writePage(liveKey.current, { scrollY: window.scrollY });
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+      if (window.scrollY > 0 && !restoring.current) {
+        writePage(liveKey.current, { scrollY: window.scrollY });
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    writePage(cacheKey, { limit });
+  }, [cacheKey, limit]);
+
+  // Thumbs and their expiry are written together: a mismatched pair would make
+  // the next visit either discard usable URLs or trust expired ones.
+  useEffect(() => {
+    writePage(cacheKey, { thumbs, thumbsExpireAt, realThumbs: [...realThumbs] });
+  }, [cacheKey, thumbs, thumbsExpireAt, realThumbs]);
 
   // Drag & drop anywhere on the page uploads into the current location.
   useEffect(() => {
@@ -194,9 +349,9 @@ export default function ProjectPage() {
   const doneCount = uploads.filter((u) => u.state === 'done').length;
   const prevDone = useRef(doneCount);
   useEffect(() => {
-    if (doneCount > prevDone.current) load();
+    if (doneCount > prevDone.current) refresh();
     prevDone.current = doneCount;
-  }, [doneCount, load]);
+  }, [doneCount, refresh]);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -220,7 +375,7 @@ export default function ProjectPage() {
       if (result.resumed > 0) parts.push(`${result.resumed} resumed`);
       if (result.skipped > 0) parts.push(`${result.skipped} already uploaded — skipped`);
       showToast(parts.length > 0 ? parts.join(' · ') : 'Nothing to upload');
-      load();
+      refresh();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not start uploads');
     }
@@ -268,7 +423,9 @@ export default function ProjectPage() {
       return next;
     });
   }, []);
-  const onRowPlay = useCallback((v: VideoInfo) => navigate(`/watch/${v.id}`), [navigate]);
+  // Opens the in-page viewer rather than navigating to /watch — leaving this
+  // page mounted is what makes closing the viewer free.
+  const onRowPlay = useCallback((v: VideoInfo) => setViewerId(v.id), []);
 
   function exitSelect() {
     setSelectMode(false);
@@ -285,27 +442,149 @@ export default function ProjectPage() {
   const readySelected = selectedVideos.filter((v) => v.status === 'READY').length;
 
   const q = query.trim().toLowerCase();
-  const filteredVideos = (videos ?? [])
-    .filter((v) => {
-      if (typeFilter === 'all') return true;
-      if (typeFilter === 'video') return v.mimeType.startsWith('video/');
-      if (typeFilter === 'image') return v.mimeType.startsWith('image/');
-      return !v.mimeType.startsWith('video/') && !v.mimeType.startsWith('image/');
-    })
-    .filter((v) => (statusFilter === 'all' ? true : v.status === statusFilter))
-    .filter((v) => (q ? v.displayName.toLowerCase().includes(q) : true))
-    .sort((a, b) => {
-      switch (sortBy) {
-        case 'oldest':
-          return a.createdAt.localeCompare(b.createdAt);
-        case 'largest':
-          return b.size - a.size;
-        case 'name':
-          return a.displayName.localeCompare(b.displayName);
-        default:
-          return b.createdAt.localeCompare(a.createdAt);
+  // Memoized because these arrays are handed to the windowed list and the
+  // viewer: a fresh identity on every keystroke would re-run the viewer's
+  // preload effects and defeat the memoized tiles.
+  const filteredVideos = useMemo(
+    () =>
+      (videos ?? [])
+        .filter((v) => {
+          if (typeFilter === 'all') return true;
+          if (typeFilter === 'video') return v.mimeType.startsWith('video/');
+          if (typeFilter === 'image') return v.mimeType.startsWith('image/');
+          return !v.mimeType.startsWith('video/') && !v.mimeType.startsWith('image/');
+        })
+        .filter((v) => (statusFilter === 'all' ? true : v.status === statusFilter))
+        .filter((v) => (q ? v.displayName.toLowerCase().includes(q) : true))
+        .sort((a, b) => {
+          switch (sortBy) {
+            case 'oldest':
+              return a.createdAt.localeCompare(b.createdAt);
+            case 'largest':
+              return b.size - a.size;
+            case 'name':
+              return a.displayName.localeCompare(b.displayName);
+            default:
+              return b.createdAt.localeCompare(a.createdAt);
+          }
+        }),
+    [videos, typeFilter, statusFilter, q, sortBy],
+  );
+
+  // What the viewer can step through: everything currently listed that is
+  // actually openable, in the order shown on screen.
+  const viewable = useMemo(() => filteredVideos.filter((v) => v.status === 'READY'), [filteredVideos]);
+  const viewerIndex = viewerId ? viewable.findIndex((v) => v.id === viewerId) : -1;
+
+  /**
+   * Low-resolution stand-ins for the viewer. Restricted to genuine thumbnails:
+   * for a photo whose derivative is still being generated the grid URL is the
+   * original itself, and handing that to the viewer as a "preview" would show a
+   * multi-megabyte file and then download it a second time under a separately
+   * signed URL.
+   */
+  const previews = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const id of realThumbs) {
+      const url = thumbs[id];
+      if (url) out[id] = url;
+    }
+    return out;
+  }, [thumbs, realThumbs]);
+
+  /**
+   * Sign thumbnails for the rendered window, in server-sized chunks, growing as
+   * the user scrolls.
+   *
+   * The in-flight work deliberately outlives any single run of this effect. A
+   * derivative that does not exist yet is reported by the server as `pending`
+   * (with the original standing in meanwhile), and we re-ask on a backoff until
+   * it flips to the small file. If those retry timers were torn down by the
+   * effect's cleanup they would be cancelled by the very `setThumbs` that
+   * scheduled them — the poll would never fire even once and the grid would
+   * keep serving full-size originals forever. So cancellation is tied to
+   * leaving the folder, not to re-rendering.
+   */
+  const thumbTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = thumbTimers.current;
+    return () => {
+      for (const t of timers) clearTimeout(t);
+      timers.clear();
+    };
+  }, [cacheKey]);
+
+  useEffect(() => {
+    if (viewMode !== 'grid' || !videos) return;
+    if (thumbsExpireAt > 0 && Date.now() > thumbsExpireAt - 120_000) {
+      // Signed URLs went stale — drop them and let this effect re-run.
+      thumbsRequested.current = new Set();
+      setThumbs({});
+      setRealThumbs(new Set());
+      setThumbsExpireAt(0);
+      return;
+    }
+    const wanted = filteredVideos
+      .slice(0, limit + 24)
+      .filter((v) => v.status === 'READY' && v.mimeType.startsWith('image/') && !thumbsRequested.current.has(v.id))
+      .map((v) => v.id);
+    if (wanted.length === 0) return;
+    for (const id of wanted) thumbsRequested.current.add(id);
+
+    const key = liveKey.current;
+    const stale = () => liveKey.current !== key;
+
+    const fetchChunk = async (chunk: string[], attempt: number): Promise<void> => {
+      if (stale()) return;
+      try {
+        const r = await api.viewUrls(chunk, 'thumb');
+        if (stale()) return;
+        setThumbsExpireAt(Date.parse(r.expiresAt));
+        setThumbs((t) => ({ ...t, ...r.urls }));
+        // Only ids the server did NOT report as pending are real thumbnails.
+        const pending = new Set(r.pending);
+        const done = Object.keys(r.urls).filter((id) => !pending.has(id));
+        if (done.length > 0) {
+          setRealThumbs((s) => {
+            const next = new Set(s);
+            for (const id of done) next.add(id);
+            return next;
+          });
+        }
+        if (r.pending.length > 0 && attempt < 8) {
+          const delay = Math.min(1000 * 2 ** attempt, 15_000);
+          const timer = setTimeout(() => {
+            thumbTimers.current.delete(timer);
+            void fetchChunk(r.pending, attempt + 1);
+          }, delay);
+          thumbTimers.current.add(timer);
+        } else if (r.pending.length > 0) {
+          // Gave up waiting; let a later pass (scroll, filter) try again.
+          for (const id of r.pending) thumbsRequested.current.delete(id);
+        }
+      } catch {
+        // Let them be retried on the next pass rather than sticking forever.
+        for (const id of chunk) thumbsRequested.current.delete(id);
       }
-    });
+    };
+
+    for (let i = 0; i < wanted.length; i += 200) {
+      void fetchChunk(wanted.slice(i, i + 200), 0);
+    }
+    // `filteredVideos` is derived from exactly these deps. `thumbs` is
+    // deliberately absent: `thumbsRequested` already dedupes, and depending on
+    // it would restart this effect on every response.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, videos, limit, query, statusFilter, typeFilter, sortBy, thumbsExpireAt, thumbEpoch, cacheKey]);
+
+  // Nothing re-runs the effect above while a grid simply sits open, so expiring
+  // URLs would quietly become 403s. Nudge it as the hour is nearly up.
+  useEffect(() => {
+    if (viewMode !== 'grid' || thumbsExpireAt <= 0) return;
+    const due = thumbsExpireAt - 120_000 - Date.now();
+    const timer = setTimeout(() => setThumbEpoch((n) => n + 1), Math.max(due, 1000));
+    return () => clearTimeout(timer);
+  }, [viewMode, thumbsExpireAt]);
 
   async function doMove(targets: VideoInfo[], target: string | null, targetName: string) {
     setMoving(null);
@@ -319,10 +598,10 @@ export default function ProjectPage() {
       }
       showToast(moved === 1 ? `Moved to ${targetName}` : `${moved} videos moved to ${targetName}`);
       exitSelect();
-      load();
+      refresh();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Move failed');
-      load();
+      refresh();
     }
   }
 
@@ -533,7 +812,8 @@ export default function ProjectPage() {
                 items={filteredVideos}
                 keyFor={(v) => v.id}
                 estimateHeight={viewMode === 'grid' ? 120 : 74}
-                initial={viewMode === 'grid' ? 60 : 30}
+                limit={limit}
+                onLimitChange={setLimit}
                 renderItem={(v) =>
                   viewMode === 'grid' ? (
                     <GridTile
@@ -566,6 +846,18 @@ export default function ProjectPage() {
           )}
         </section>
       </div>
+
+      {viewerIndex >= 0 && (
+        <Lightbox
+          items={viewable}
+          index={viewerIndex}
+          onIndex={(i) => setViewerId(viewable[i]?.id ?? null)}
+          onClose={() => setViewerId(null)}
+          previewHint={previews}
+          onError={setNotice}
+          onToast={showToast}
+        />
+      )}
 
       {/* selection action bar / upload button */}
       {selectMode ? (
@@ -688,7 +980,10 @@ export default function ProjectPage() {
                   icon={videoMenu.mimeType.startsWith('image/') ? <IconImage size={18} /> : <IconPlay size={18} />}
                   label={videoMenu.mimeType.startsWith('video/') ? 'Play' : 'View'}
                   sub="Opens the original — nothing is re-encoded"
-                  onClick={() => navigate(`/watch/${videoMenu.id}`)}
+                  onClick={() => {
+                    setViewerId(videoMenu.id);
+                    setVideoMenu(null);
+                  }}
                 />
                 <SheetAction
                   icon={<IconDownload size={18} />}
@@ -744,7 +1039,7 @@ export default function ProjectPage() {
                     try {
                       await api.setVideoHidden(v.id, !v.hidden);
                       showToast(v.hidden ? 'Visible to everyone again' : 'Hidden from members');
-                      load();
+                      refresh();
                     } catch (err) {
                       setNotice(err instanceof Error ? err.message : 'Could not change visibility');
                     }
@@ -812,7 +1107,7 @@ export default function ProjectPage() {
         submitLabel="Rename"
         onSubmit={async (name) => {
           await api.renameVideo(renamingVideo!.id, name);
-          load();
+          refresh();
         }}
       />
       <ConfirmSheet
@@ -830,7 +1125,7 @@ export default function ProjectPage() {
             await api.deleteVideo(v.id);
           }
           exitSelect();
-          load();
+          refresh();
         }}
       />
 
@@ -843,7 +1138,7 @@ export default function ProjectPage() {
         submitLabel="Create folder"
         onSubmit={async (name) => {
           await api.createFolder(projectId, { name });
-          load();
+          refresh();
         }}
       />
       <Sheet open={folderMenu !== null} onClose={() => setFolderMenu(null)} title={folderMenu?.name}>
@@ -885,7 +1180,7 @@ export default function ProjectPage() {
         submitLabel="Rename"
         onSubmit={async (name) => {
           await api.renameFolder(renamingFolder!.id, { name });
-          load();
+          refresh();
         }}
       />
       {accessFolder && (
@@ -895,7 +1190,7 @@ export default function ProjectPage() {
           onSaved={() => {
             setAccessFolder(null);
             showToast('Folder access updated');
-            load();
+            refresh();
           }}
           onError={setNotice}
         />
@@ -913,7 +1208,7 @@ export default function ProjectPage() {
         confirmLabel="Delete forever"
         onConfirm={async () => {
           await api.deleteFolder(deletingFolder!.id, (deletingFolder?.videoCount ?? 0) > 0);
-          load();
+          refresh();
         }}
       />
     </Layout>
@@ -1104,6 +1399,42 @@ function FolderAccessSheet({
 }
 
 
+/**
+ * Fades a tile in once its bytes have decoded, over a shimmer placeholder, so a
+ * grid fills in smoothly instead of flashing half-drawn images. `loaded` is
+ * never reset when `src` changes: the URL flips from the original to the
+ * generated thumbnail mid-scroll, and blanking an already-painted tile for that
+ * swap would be worse than showing it a moment longer.
+ */
+function Thumb({ src, fallback }: { src: string; fallback: ReactNode }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  // A signed URL that expired while the grid sat open returns 403. Showing the
+  // browser's broken-image glyph would be worse than the plain icon.
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (failed) {
+    return <span className="flex h-full w-full items-center justify-center text-zinc-600">{fallback}</span>;
+  }
+  return (
+    <>
+      {!loaded && <span className="absolute inset-0 animate-pulse bg-white/[0.06]" />}
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+        className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+      />
+    </>
+  );
+}
+
 const GridTile = memo(function GridTile({
   v,
   thumb,
@@ -1125,6 +1456,7 @@ const GridTile = memo(function GridTile({
 }) {
   const isImage = v.mimeType.startsWith('image/');
   const isVideo = v.mimeType.startsWith('video/');
+  const icon = isImage ? <IconImage size={22} /> : isVideo ? <IconPlay size={22} /> : <IconFile size={22} />;
   return (
     <div
       className={`group relative aspect-square overflow-hidden rounded-lg border transition-colors ${
@@ -1138,10 +1470,14 @@ const GridTile = memo(function GridTile({
         aria-label={v.displayName}
       >
         {thumb ? (
-          <img src={thumb} alt="" loading="lazy" className="h-full w-full object-cover" />
+          <Thumb src={thumb} fallback={icon} />
         ) : (
-          <span className="flex h-full w-full items-center justify-center text-zinc-600">
-            {isImage ? <IconImage size={22} /> : isVideo ? <IconPlay size={22} /> : <IconFile size={22} />}
+          <span
+            className={`flex h-full w-full items-center justify-center text-zinc-600 ${
+              isImage && v.status === 'READY' ? 'animate-pulse' : ''
+            }`}
+          >
+            {icon}
           </span>
         )}
         <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1.5 py-1 text-left text-[10px] text-zinc-300">

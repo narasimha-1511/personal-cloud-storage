@@ -8,18 +8,22 @@ import { uploadRoutes } from './routes/uploads.js';
 import { folderRoutes, projectRoutes } from './routes/projects.js';
 import { videoRoutes } from './routes/videos.js';
 import type { R2Client } from './r2.js';
+import { createThumbnailer, type Thumbnailer } from './thumbs.js';
 import { log } from './log.js';
 
 export interface AppDeps {
   env: Env;
   db: Db;
   r2: R2Client | null;
+  /** Injectable so tests can drive generation deterministically. */
+  thumbnailer?: Thumbnailer;
 }
 
 export type AppContext = { Variables: AuthVariables };
 
 export function createApp(deps: AppDeps): Hono<AppContext> {
   const { env, db, r2 } = deps;
+  const thumbnailer = deps.thumbnailer ?? createThumbnailer({ db, r2, env });
   const sessionSecret = env.SESSION_SECRET ?? 'dev-insecure-session-secret';
   const auth = requireAuth(db, sessionSecret);
 
@@ -39,7 +43,7 @@ export function createApp(deps: AppDeps): Hono<AppContext> {
   app.route('/api/folders', folderRoutes({ db, r2 }));
   app.use('/api/videos/*', auth);
   app.use('/api/videos', auth);
-  app.route('/api/videos', videoRoutes({ db, env, r2 }));
+  app.route('/api/videos', videoRoutes({ db, env, r2, thumbnailer }));
 
   app.notFound((c) => {
     if (c.req.path.startsWith('/api/')) {

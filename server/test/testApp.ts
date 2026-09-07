@@ -6,6 +6,7 @@ import { projects, users } from '../src/db/schema.js';
 import { ulid } from 'ulid';
 import { testEnv } from './helpers.js';
 import { FakeR2Client } from './fakeR2.js';
+import { createThumbnailer, type Thumbnailer } from '../src/thumbs.js';
 import type { Env } from '../src/env.js';
 
 export interface TestApp {
@@ -13,6 +14,8 @@ export interface TestApp {
   db: Db;
   env: Env;
   r2: FakeR2Client;
+  /** Exposed so tests can await queued thumbnail generation. */
+  thumbnailer: Thumbnailer;
   /** Creates the user if needed and returns a Cookie header value. */
   loginAs(username: string, role?: 'admin' | 'user'): Promise<string>;
   /** Inserts a project row directly and returns its id. */
@@ -23,7 +26,8 @@ export async function createTestApp(envOverrides: Partial<Env> = {}): Promise<Te
   const env = testEnv(envOverrides);
   const { db } = createDb(':memory:');
   const r2 = new FakeR2Client();
-  const app = createApp({ env, db, r2 });
+  const thumbnailer = createThumbnailer({ db, r2, env });
+  const app = createApp({ env, db, r2, thumbnailer });
 
   const password = 'test-password-123';
   const created = new Set<string>();
@@ -62,7 +66,7 @@ export async function createTestApp(envOverrides: Partial<Env> = {}): Promise<Te
     return id;
   }
 
-  return { app, db, env, r2, loginAs, seedProject };
+  return { app, db, env, r2, thumbnailer, loginAs, seedProject };
 }
 
 /** JSON POST helper for tests. */

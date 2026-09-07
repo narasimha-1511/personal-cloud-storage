@@ -14,6 +14,18 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.5.0',
+    date: '2026-09-07',
+    title: 'Instant photo viewer, much faster grids',
+    changes: [
+      'Photos and videos now open in place — closing one returns you to the exact spot you were scrolled to, with nothing reloading',
+      'Step through a folder with the arrows beside the photo, your keyboard, or a swipe',
+      'Photo grids load small thumbnails instead of full-size originals — dramatically less data and far quicker to fill',
+      'Opening a photo shows it immediately, sharpening as the original arrives; the next and previous are loaded ahead of you',
+      'Coming back to a folder from anywhere in the app is instant instead of a fresh load',
+    ],
+  },
+  {
     version: '2.4.0',
     date: '2026-09-07',
     title: 'Folder sharing, faster small files, visible progress',

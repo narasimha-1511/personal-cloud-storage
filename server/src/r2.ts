@@ -6,6 +6,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   ListPartsCommand,
+  PutObjectCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
@@ -37,6 +38,10 @@ export interface R2Client {
   ): Promise<string>;
   headObject(key: string): Promise<{ size: number } | null>;
   deleteObject(key: string): Promise<void>;
+  /** Reads a whole object into memory. Only used for thumbnail sources, which
+   *  are size-capped — never call this on an arbitrary video. */
+  getObject(key: string): Promise<Buffer>;
+  putObject(key: string, body: Buffer, contentType: string): Promise<void>;
 }
 
 export function createR2Client(env: Env): R2Client | null {
@@ -158,6 +163,18 @@ export function createR2Client(env: Env): R2Client | null {
 
     async deleteObject(key) {
       await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    },
+
+    async getObject(key) {
+      const out = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      if (!out.Body) throw new Error(`Empty body for ${key}`);
+      return Buffer.from(await out.Body.transformToByteArray());
+    },
+
+    async putObject(key, body, contentType) {
+      await s3.send(
+        new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }),
+      );
     },
   };
 }

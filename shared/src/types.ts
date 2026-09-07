@@ -192,6 +192,20 @@ export interface SignedUrlResponse {
   expiresAt: string;
 }
 
+/** 'thumb' asks for the small grid derivative instead of the original file. */
+export type ViewUrlVariant = 'original' | 'thumb';
+
+export interface ViewUrlsResponse {
+  /** id -> signed URL. Falls back to the original when no thumbnail exists yet. */
+  urls: Record<string, string>;
+  /**
+   * Ids whose thumbnail is still being generated. Ask again shortly and the
+   * URL will point at the derivative instead of the original.
+   */
+  pending: string[];
+  expiresAt: string;
+}
+
 export interface MoveVideoRequest {
   folderId: string | null;
 }

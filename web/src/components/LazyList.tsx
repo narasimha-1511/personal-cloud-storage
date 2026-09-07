@@ -7,6 +7,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
  * `content-visibility: auto` lets the browser skip layout/paint for rendered
  * rows that are offscreen. Rows should be memoized components so progress
  * ticks only re-render the rows whose data actually changed.
+ *
+ * Pass `limit`/`onLimitChange` to hoist the window size into the parent — the
+ * library page does that so returning to a page can restore how far the user
+ * had scrolled instead of collapsing back to the first screenful.
  */
 export function LazyList<T>({
   items,
@@ -15,6 +19,8 @@ export function LazyList<T>({
   initial = 30,
   step = 60,
   estimateHeight = 80,
+  limit: controlledLimit,
+  onLimitChange,
 }: {
   items: T[];
   keyFor: (item: T) => string;
@@ -22,8 +28,11 @@ export function LazyList<T>({
   initial?: number;
   step?: number;
   estimateHeight?: number;
+  limit?: number;
+  onLimitChange?: (next: number) => void;
 }) {
-  const [limit, setLimit] = useState(initial);
+  const [ownLimit, setOwnLimit] = useState(initial);
+  const limit = controlledLimit ?? ownLimit;
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,13 +40,15 @@ export function LazyList<T>({
     if (!el || limit >= items.length || typeof IntersectionObserver === 'undefined') return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) setLimit((l) => l + step);
+        if (!entries.some((e) => e.isIntersecting)) return;
+        if (onLimitChange) onLimitChange(limit + step);
+        else setOwnLimit((l) => l + step);
       },
       { rootMargin: '600px' },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [limit, items.length, step]);
+  }, [limit, items.length, step, onLimitChange]);
 
   return (
     <>

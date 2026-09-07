@@ -14,6 +14,8 @@ interface FakeMultipart {
 export class FakeR2Client implements R2Client {
   multiparts = new Map<string, FakeMultipart>();
   objects = new Map<string, { size: number; contentType: string }>();
+  /** Real bytes, populated only by putObject — multipart tests track sizes only. */
+  bodies = new Map<string, Buffer>();
   private counter = 0;
 
   async createMultipartUpload(key: string, contentType: string) {
@@ -68,6 +70,17 @@ export class FakeR2Client implements R2Client {
 
   async deleteObject(key: string) {
     this.objects.delete(key);
+  }
+
+  async getObject(key: string) {
+    const body = this.bodies.get(key);
+    if (!body) throw new Error(`NoSuchKey: ${key}`);
+    return body;
+  }
+
+  async putObject(key: string, body: Buffer, contentType: string) {
+    this.bodies.set(key, body);
+    this.objects.set(key, { size: body.length, contentType });
   }
 
   private get(uploadId: string): FakeMultipart {

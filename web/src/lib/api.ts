@@ -18,6 +18,8 @@ import type {
   UploadStatusResponse,
   UserInfo,
   VideoInfo,
+  ViewUrlsResponse,
+  ViewUrlVariant,
 } from '@videovault/shared';
 import { TransferError, classifyHttpStatus } from './network';
 
@@ -128,8 +130,8 @@ export const api = {
   },
   getVideo: (id: string) => request<{ video: VideoInfo }>(`/api/videos/${id}`),
   viewUrl: (id: string) => request<SignedUrlResponse>(`/api/videos/${id}/view-url`, post()),
-  viewUrls: (ids: string[]) =>
-    request<{ urls: Record<string, string>; expiresAt: string }>('/api/videos/view-urls', post({ ids })),
+  viewUrls: (ids: string[], variant: ViewUrlVariant = 'original') =>
+    request<ViewUrlsResponse>('/api/videos/view-urls', post({ ids, variant })),
   downloadUrl: (id: string) => request<SignedUrlResponse>(`/api/videos/${id}/download-url`, post()),
   renameVideo: (id: string, name: string) =>
     request<{ ok: true }>(`/api/videos/${id}/rename`, post({ name })),

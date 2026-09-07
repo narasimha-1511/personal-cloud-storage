@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { UserInfo } from '@videovault/shared';
 import { api } from './lib/api';
+import { clearPageCache } from './lib/pageCache';
 
 interface AuthState {
   user: UserInfo | null;
@@ -30,6 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await api.logout().catch(() => {});
+    // Cached file lists and signed URLs must not survive into the next session.
+    clearPageCache();
     setUser(null);
   }, []);
 

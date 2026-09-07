@@ -50,8 +50,32 @@ Repo layout: `server/` (Hono API, Drizzle + SQLite), `web/` (React PWA), `shared
 | `PART_URL_TTL_SECONDS` | no | `3600` | Lifetime of part-upload links |
 | `SESSION_TTL_DAYS` | no | `30` | Login session lifetime |
 | `PUBLIC_ORIGIN` | no | — | Public URL of the app (informational) |
+| `THUMBNAILS_ENABLED` | no | `true` | Generate grid thumbnails (set `false` to serve originals) |
+| `THUMB_MAX_EDGE` | no | `512` | Longest edge of a generated thumbnail, in px |
+| `THUMB_QUALITY` | no | `72` | WebP quality for thumbnails |
+| `THUMB_CONCURRENCY` | no | `2` | Photos decoded at once — each costs real memory |
+| `THUMB_MAX_SOURCE_BYTES` | no | `41943040` (40 MB) | Originals above this are served as-is |
 
 Secrets never reach the browser; the frontend has no environment at all.
+
+### Grid thumbnails
+
+Photo grids would otherwise download the full original for every tile — a 5 MB,
+12 MP file painted into a 110 px square. Instead, the first time a photo appears
+in a grid the server generates a small WebP with [sharp], stores it in R2 beside
+the original (`thumbs/<id>.webp`), and serves that from then on: roughly 25 KB
+per tile instead of several megabytes.
+
+Generation is lazy and happens once per photo, so an existing library backfills
+itself as folders are browsed. While a derivative is still being made the
+original is served, so tiles are never blank. Codecs libvips cannot decode
+(HEIC, some RAW) are marked unsupported and always fall back to the original.
+
+`sharp` ships a platform-specific native binary and adds ~50 MB to the image. It
+is installed by the normal `npm ci` in the Dockerfile — no extra system packages
+are needed on `node:22-slim`.
+
+[sharp]: https://sharp.pixelplumbing.com
 
 ## 3. Cloudflare R2 setup (once)
 
