@@ -42,6 +42,47 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
   const app = new Hono<{ Variables: AuthVariables }>();
 
   app.get('/', async (c) => {
+    const user = c.get('user');
+
+    if (user.role !== 'admin' && user.scoped) {
+      // Folder-only accounts: list only projects containing granted folders,
+      // with counts computed over those folders alone.
+      const granted = await db
+        .select({ folder: folders })
+        .from(folderAccess)
+        .innerJoin(folders, eq(folderAccess.folderId, folders.id))
+        .where(eq(folderAccess.userId, user.id));
+      const byProject = new Map<string, string[]>();
+      for (const g of granted) {
+        byProject.set(g.folder.projectId, [...(byProject.get(g.folder.projectId) ?? []), g.folder.id]);
+      }
+      if (byProject.size === 0) return c.json({ projects: [] });
+      const rows = await db
+        .select()
+        .from(projects)
+        .where(inArray(projects.id, [...byProject.keys()]))
+        .orderBy(projects.createdAt);
+      const out: ProjectInfo[] = [];
+      for (const p of rows) {
+        const folderIds = byProject.get(p.id)!;
+        const count = (
+          await db
+            .select({ n: sql<number>`COUNT(*)` })
+            .from(videos)
+            .where(and(inArray(videos.folderId, folderIds), sql`videos.status != 'ABORTED'`))
+        )[0];
+        out.push({
+          id: p.id,
+          slug: p.slug,
+          name: p.name,
+          createdAt: p.createdAt,
+          videoCount: count?.n ?? 0,
+          folderCount: folderIds.length,
+        });
+      }
+      return c.json({ projects: out });
+    }
+
     // NOTE: the correlated references must be written as literal
     // `projects.id` — interpolating the drizzle column renders an
     // unqualified "id" which the subquery resolves against ITS OWN table,
@@ -134,9 +175,10 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
       if (await canSeeFolder(db, user, r.folder)) visible.push(r);
     }
 
-    // Admins also get the member list of restricted folders.
+    // Admins also get the member list (grants matter for folder-only
+    // accounts even when the folder is not restricted).
     let membersByFolder = new Map<string, string[]>();
-    if (user.role === 'admin' && visible.some((r) => r.folder.restricted)) {
+    if (user.role === 'admin' && visible.length > 0) {
       const access = await db
         .select()
         .from(folderAccess)
@@ -220,7 +262,9 @@ export function folderRoutes({ db, r2 }: ProjectRouteDeps) {
 
     await db.update(folders).set({ restricted: body.data.restricted }).where(eq(folders.id, id));
     await db.delete(folderAccess).where(eq(folderAccess.folderId, id));
-    if (body.data.restricted && body.data.userIds.length > 0) {
+    // Grants persist regardless of the restricted flag: folder-only accounts
+    // rely on them even for folders everyone else can see.
+    if (body.data.userIds.length > 0) {
       const unique = [...new Set(body.data.userIds)];
       await db.insert(folderAccess).values(unique.map((userId) => ({ folderId: id, userId })));
     }

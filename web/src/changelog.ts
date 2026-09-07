@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.4.0',
+    date: '2026-09-07',
+    title: 'Folder sharing, faster small files, visible progress',
+    changes: [
+      'Folder-only accounts: create a user who sees just the folders you grant (Users → Library access)',
+      'Grant folders per person via folder menu → Who can access — without hiding them from others',
+      'Small files now upload several at a time; big files keep their parallel parts',
+      'A floating progress pill on every page shows live upload/download progress — tap it for Transfers',
+    ],
+  },
+  {
     version: '2.3.0',
     date: '2026-09-05',
     title: 'Drag & drop',

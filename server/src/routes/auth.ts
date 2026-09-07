@@ -60,6 +60,7 @@ export function authRoutes(db: Db, env: Env, sessionSecret: string) {
       id: row.id,
       username: row.username,
       role: row.role,
+      scoped: row.scoped,
       createdAt: row.createdAt,
     };
     return c.json({ user } satisfies LoginResponse);

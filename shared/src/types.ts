@@ -10,6 +10,8 @@ export interface UserInfo {
   id: string;
   username: string;
   role: Role;
+  /** Folder-only account: sees only folders explicitly granted to it. */
+  scoped: boolean;
   createdAt: string;
 }
 
@@ -81,6 +83,7 @@ export interface CreateUserRequest {
   username: string;
   password: string;
   role: Role;
+  scoped?: boolean;
 }
 
 export interface ResetPasswordRequest {

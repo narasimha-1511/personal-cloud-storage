@@ -1042,8 +1042,7 @@ function FolderAccessSheet({
             </button>
           ))}
         </div>
-        {restricted && (
-          <div className="max-h-[40vh] space-y-1 overflow-y-auto">
+        <div className="max-h-[40vh] space-y-1 overflow-y-auto">
             {users === null && <Spinner />}
             {users
               ?.filter((u) => u.role !== 'admin')
@@ -1070,13 +1069,16 @@ function FolderAccessSheet({
                       <IconCheck size={12} />
                     </span>
                     <span className="text-[14px] font-medium">{u.username}</span>
+                    {u.scoped && <span className="rounded bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-zinc-400">folder-only</span>}
                     {!u.active && <span className="text-[11px] text-red-400">deactivated</span>}
                   </button>
                 );
               })}
-            <p className="px-1 pt-1 text-[11px] text-zinc-600">Admins always have access.</p>
+            <p className="px-1 pt-1 text-[11px] text-zinc-600">
+              Admins always have access. Folder-only accounts see this folder ONLY if ticked here — even when set to
+              Everyone.
+            </p>
           </div>
-        )}
         <Button
           full
           kind="primary"

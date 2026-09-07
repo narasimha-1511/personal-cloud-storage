@@ -23,6 +23,7 @@ export async function seedAdmin(db: Db, env: Env): Promise<void> {
     username: env.ADMIN_USERNAME,
     passwordHash: await hashPassword(env.ADMIN_PASSWORD),
     role: 'admin',
+    scoped: false,
     active: true,
     createdAt: new Date().toISOString(),
   });

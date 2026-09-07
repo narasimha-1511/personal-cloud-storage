@@ -36,7 +36,8 @@ export default function TransfersPage() {
   const sortedActive = [...activeUploads].sort(
     (a, b) => (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9) || a.localId.localeCompare(b.localId),
   );
-  const current = sortedActive.find((u) => u.state === 'uploading' || u.state === 'completing');
+  const transferring = sortedActive.filter((u) => u.state === 'uploading' || u.state === 'completing');
+  const current = transferring[0];
   const doneToday = finishedUploads.filter((u) => u.state === 'done').length;
   const remainingBytes = activeUploads.reduce((s, u) => s + (u.size - u.bytesUploaded), 0);
   const overallEta = current && current.speedBps > 0 ? Math.round(remainingBytes / current.speedBps) : null;
@@ -90,6 +91,7 @@ export default function TransfersPage() {
             {current ? (
               <p className="mt-1 truncate text-[12px] text-zinc-500 tabular-nums">
                 Now: {current.filename} · {percent(current.bytesUploaded, current.size)}% · {formatSpeed(current.speedBps)}
+                {transferring.length > 1 && ` · +${transferring.length - 1} more in parallel`}
               </p>
             ) : (
               <p className="mt-1 text-[12px] text-zinc-500">Nothing transferring right now — see the top card below for why.</p>

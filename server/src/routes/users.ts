@@ -17,6 +17,7 @@ const createUserSchema = z.object({
     .regex(/^[a-zA-Z0-9._-]+$/, 'Letters, digits, dot, dash, underscore only'),
   password: z.string().min(8).max(256),
   role: z.enum(['admin', 'user']),
+  scoped: z.boolean().optional(),
 });
 
 const resetPasswordSchema = z.object({ password: z.string().min(8).max(256) });
@@ -26,6 +27,7 @@ function toUserInfo(row: typeof users.$inferSelect): UserInfo & { active: boolea
     id: row.id,
     username: row.username,
     role: row.role,
+    scoped: row.scoped,
     createdAt: row.createdAt,
     active: row.active,
   };
@@ -56,6 +58,8 @@ export function userRoutes(db: Db) {
       username: body.data.username,
       passwordHash: await hashPassword(body.data.password),
       role: body.data.role,
+      // Only member accounts can be folder-only.
+      scoped: body.data.role === 'user' && body.data.scoped === true,
       active: true,
       createdAt: new Date().toISOString(),
     };
@@ -73,6 +77,18 @@ export function userRoutes(db: Db) {
       .where(eq(users.id, c.req.param('id')));
     if (result.changes === 0) return c.json({ error: 'User not found' }, 404);
     log({ op: 'users.reset_password', ok: true, userId: c.get('user').id, targetUserId: c.req.param('id') });
+    return c.json({ ok: true });
+  });
+
+  app.post('/:id/set-scoped', async (c) => {
+    const body = z.object({ scoped: z.boolean() }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'Invalid request' }, 400);
+    const id = c.req.param('id');
+    const target = (await db.select().from(users).where(eq(users.id, id)))[0];
+    if (!target) return c.json({ error: 'User not found' }, 404);
+    if (target.role === 'admin') return c.json({ error: 'Admins cannot be folder-only' }, 400);
+    await db.update(users).set({ scoped: body.data.scoped }).where(eq(users.id, id));
+    log({ op: 'users.set_scoped', ok: true, userId: c.get('user').id, targetUserId: id, scoped: body.data.scoped });
     return c.json({ ok: true });
   });
 

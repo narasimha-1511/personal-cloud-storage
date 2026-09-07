@@ -102,6 +102,9 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
   ) {
     const project = (await db.select().from(projects).where(eq(projects.id, projectId)).limit(1))[0];
     if (!project) return { error: 'Project not found' };
+    if (user.scoped && !folderId) {
+      return { error: 'Pick a folder you have access to' };
+    }
     let folderSlug: string | null = null;
     if (folderId) {
       const folder = (

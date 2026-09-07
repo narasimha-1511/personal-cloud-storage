@@ -13,6 +13,14 @@ import type { SessionUser } from './auth/sessions.js';
 /** WHERE fragment for video list queries (no-op for admins). */
 export function visibleVideosCondition(user: SessionUser): SQL | undefined {
   if (user.role === 'admin') return undefined;
+  if (user.scoped) {
+    // Folder-only accounts: nothing outside their granted folders exists.
+    return sql`(
+      (videos.hidden = 0 OR videos.owner_id = ${user.id})
+      AND videos.folder_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM folder_access fa WHERE fa.folder_id = videos.folder_id AND fa.user_id = ${user.id})
+    )`;
+  }
   return sql`(
     (videos.hidden = 0 OR videos.owner_id = ${user.id})
     AND (
@@ -31,7 +39,10 @@ export async function canSeeFolder(
   user: SessionUser,
   folder: { restricted: boolean; id: string },
 ): Promise<boolean> {
-  if (user.role === 'admin' || !folder.restricted) return true;
+  if (user.role === 'admin') return true;
+  // Scoped users need an explicit grant for EVERY folder; others only for
+  // restricted ones.
+  if (!user.scoped && !folder.restricted) return true;
   const rows = await db
     .select({ userId: folderAccess.userId })
     .from(folderAccess)
@@ -47,7 +58,7 @@ export async function canSeeVideo(
 ): Promise<boolean> {
   if (user.role === 'admin') return true;
   if (video.hidden && video.ownerId !== user.id) return false;
-  if (!video.folderId) return true;
+  if (!video.folderId) return !user.scoped; // root files invisible to scoped users
   const folder = (await db.select().from(folders).where(eq(folders.id, video.folderId)).limit(1))[0];
   if (!folder) return true;
   return canSeeFolder(db, user, folder);

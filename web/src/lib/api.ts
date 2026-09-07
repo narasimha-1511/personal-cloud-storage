@@ -79,6 +79,8 @@ export const api = {
     request<{ ok: true }>(`/api/users/${id}/reset-password`, post({ password })),
   setUserActive: (id: string, active: boolean) =>
     request<{ ok: true }>(`/api/users/${id}/set-active`, post({ active })),
+  setUserScoped: (id: string, scoped: boolean) =>
+    request<{ ok: true }>(`/api/users/${id}/set-scoped`, post({ scoped })),
 
   // projects / folders
   listProjects: () => request<{ projects: ProjectInfo[] }>('/api/projects'),

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { uploadManager, useDownloads, useUploads } from '../lib/managers';
 import { syncWakeLock } from '../lib/wakeLock';
@@ -16,6 +16,7 @@ import {
   IconUsers,
 } from './icons';
 import { WhatsNewSheet } from './WhatsNew';
+import { formatBytes, formatSpeed, percent } from '../lib/format';
 import { APP_VERSION } from '../changelog';
 
 const ACTIVE_UPLOAD_STATES = ['queued', 'uploading', 'completing', 'waiting_network', 'paused', 'needs_file'];
@@ -24,6 +25,7 @@ const ACTIVE_DOWNLOAD_STATES = ['queued', 'downloading', 'paused', 'waiting_netw
 export default function Layout({ children, title, back }: { children: ReactNode; title?: string; back?: string }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'none' | 'unsupported'>('idle');
@@ -227,6 +229,9 @@ export default function Layout({ children, title, back }: { children: ReactNode;
         </nav>
       </div>
 
+      {/* floating transfer progress, visible on every page while bytes move */}
+      {location.pathname !== '/transfers' && <TransferPill onOpen={() => navigate('/transfers')} />}
+
       {/* mobile account sheet */}
       <Sheet open={menuOpen} onClose={() => setMenuOpen(false)}>
         <div className="mb-4 flex items-center gap-3 px-1">
@@ -310,5 +315,61 @@ function Tab({ to, label, icon, badge, end }: { to: string; label: string; icon:
       </span>
       {label}
     </NavLink>
+  );
+}
+
+
+/** Floating live-progress pill so downloads/uploads are never invisible. */
+function TransferPill({ onOpen }: { onOpen: () => void }) {
+  const uploads = useUploads();
+  const downloads = useDownloads();
+
+  const upActive = uploads.filter((u) => ACTIVE_UPLOAD_STATES.includes(u.state));
+  const downActive = downloads.filter((d) => ACTIVE_DOWNLOAD_STATES.includes(d.state));
+  if (upActive.length === 0 && downActive.length === 0) return null;
+
+  const upDone = upActive.reduce((s, u) => s + u.bytesUploaded, 0);
+  const upTotal = upActive.reduce((s, u) => s + u.size, 0);
+  const upSpeed = upActive.reduce((s, u) => s + u.speedBps, 0);
+  const downDone = downActive.reduce((s, d) => s + d.bytesWritten, 0);
+  const downTotal = downActive.reduce((s, d) => s + d.totalSize, 0);
+  const downSpeed = downActive.reduce((s, d) => s + d.speedBps, 0);
+
+  const rows: { label: string; pct: number; detail: string }[] = [];
+  if (upActive.length > 0) {
+    rows.push({
+      label: `↑ ${upActive.length} file${upActive.length === 1 ? '' : 's'}`,
+      pct: percent(upDone, upTotal),
+      detail: upSpeed > 0 ? formatSpeed(upSpeed) : `${formatBytes(upTotal - upDone)} left`,
+    });
+  }
+  if (downActive.length > 0) {
+    rows.push({
+      label: `↓ ${downActive.length} file${downActive.length === 1 ? '' : 's'}`,
+      pct: percent(downDone, downTotal),
+      detail: downSpeed > 0 ? formatSpeed(downSpeed) : `${formatBytes(downTotal - downDone)} left`,
+    });
+  }
+
+  return (
+    <button
+      onClick={onOpen}
+      aria-label="Open Transfers"
+      className="fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom))] left-4 z-40 w-44 rounded-xl border border-white/10 bg-[#141417] p-3 text-left shadow-lg transition-colors hover:border-white/20 lg:bottom-6 lg:left-64"
+    >
+      {rows.map((r) => (
+        <div key={r.label} className="mb-2 last:mb-0">
+          <div className="mb-1 flex items-baseline justify-between gap-2">
+            <span className="text-[11px] font-semibold text-zinc-200 tabular-nums">
+              {r.label} · {r.pct}%
+            </span>
+            <span className="truncate text-[10px] text-zinc-500 tabular-nums">{r.detail}</span>
+          </div>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-white/[0.08]">
+            <div className="h-full rounded-full bg-blue-500 transition-[width] duration-500" style={{ width: `${r.pct}%` }} />
+          </div>
+        </div>
+      ))}
+    </button>
   );
 }

@@ -143,3 +143,83 @@ describe('batch view urls', () => {
     expect(Object.keys(adminUrls.urls).sort()).toEqual([visible, secret].sort());
   });
 });
+
+describe('folder-only (scoped) accounts', () => {
+  it('see and touch nothing except their granted folders', async () => {
+    const t = await createTestApp();
+    const admin = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+    const otherProject = await t.seedProject('other-trip');
+
+    // Two folders + a root file; the scoped user gets only "Shared".
+    const sharedRes = await t.app.request(`/api/projects/${projectId}/folders`, post({ name: 'Shared' }, admin));
+    const { folder: shared } = (await sharedRes.json()) as { folder: FolderInfo };
+    const privRes = await t.app.request(`/api/projects/${projectId}/folders`, post({ name: 'Rest' }, admin));
+    const { folder: rest } = (await privRes.json()) as { folder: FolderInfo };
+    const rootVideo = await readyVideo(t, admin, projectId, 'root.mp4');
+    const sharedVideo = await readyVideo(t, admin, projectId, 'shared.mp4', shared.id);
+    const restVideo = await readyVideo(t, admin, projectId, 'rest.mp4', rest.id);
+
+    // Create the scoped account and grant it the Shared folder.
+    const created = await t.app.request(
+      '/api/users',
+      post({ username: 'guest', password: 'guest-pass-123', role: 'user', scoped: true }, admin),
+    );
+    expect(created.status).toBe(201);
+    const { user: guestInfo } = (await created.json()) as { user: { id: string; scoped: boolean } };
+    expect(guestInfo.scoped).toBe(true);
+    // Grant WITHOUT restricting the folder for everyone else.
+    await t.app.request(`/api/folders/${shared.id}/access`, post({ restricted: false, userIds: [guestInfo.id] }, admin));
+
+    const guestLogin = await t.app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'guest', password: 'guest-pass-123' }),
+    });
+    expect(guestLogin.status).toBe(200);
+    const guest = (guestLogin.headers.get('set-cookie') ?? '').split(';')[0]!;
+
+    // Projects: only the one containing the granted folder, counts scoped to it.
+    const projects = (await (await t.app.request('/api/projects', { headers: { cookie: guest } })).json()) as {
+      projects: { id: string; videoCount: number; folderCount: number }[];
+    };
+    expect(projects.projects.map((p) => p.id)).toEqual([projectId]);
+    expect(projects.projects[0]!.videoCount).toBe(1);
+    expect(projects.projects[0]!.folderCount).toBe(1);
+    void otherProject;
+
+    // Folders: only Shared.
+    const guestFolders = (await (await t.app.request(`/api/projects/${projectId}/folders`, { headers: { cookie: guest } })).json()) as {
+      folders: FolderInfo[];
+    };
+    expect(guestFolders.folders.map((f) => f.id)).toEqual([shared.id]);
+
+    // Videos: only the shared folder's; root and other folders invisible.
+    expect((await listVisible(t, guest, projectId)).map((v) => v.id)).toEqual([sharedVideo]);
+    expect((await t.app.request(`/api/videos/${rootVideo}/view-url`, post(undefined, guest))).status).toBe(404);
+    expect((await t.app.request(`/api/videos/${restVideo}/view-url`, post(undefined, guest))).status).toBe(404);
+    expect((await t.app.request(`/api/videos/${sharedVideo}/view-url`, post(undefined, guest))).status).toBe(200);
+
+    // Uploads: root refused, granted folder allowed, other folder refused.
+    const rootUp = await t.app.request(
+      '/api/uploads/create',
+      post({ filename: 'x.mp4', size: 1000, mimeType: 'video/mp4', projectId }, guest),
+    );
+    expect(rootUp.status).toBe(404);
+    const restUp = await t.app.request(
+      '/api/uploads/create',
+      post({ filename: 'x.mp4', size: 1000, mimeType: 'video/mp4', projectId, folderId: rest.id }, guest),
+    );
+    expect(restUp.status).toBe(404);
+    const okUp = await t.app.request(
+      '/api/uploads/create',
+      post({ filename: 'x.mp4', size: 1000, mimeType: 'video/mp4', projectId, folderId: shared.id }, guest),
+    );
+    expect(okUp.status).toBe(201);
+
+    // Meanwhile a NORMAL member still sees everything (folder was not
+    // restricted): the 3 ready videos plus the guest's pending upload.
+    const member = await t.loginAs('editor', 'user');
+    expect((await listVisible(t, member, projectId)).length).toBe(4);
+  });
+});

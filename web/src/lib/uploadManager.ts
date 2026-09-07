@@ -30,8 +30,17 @@ export interface UploadApi {
 }
 
 export interface UploadManagerConfig {
-  /** Max simultaneous part uploads. Kept low: the client is a phone. */
+  /** Max simultaneous part uploads within one file. Kept low: phones. */
   concurrency: number;
+  /**
+   * Global budget of simultaneous transfers across all files. A big file
+   * uses up to `concurrency` of these for its parts; spare slots are filled
+   * by the next files in the queue, so many small files upload in parallel
+   * instead of waiting single-file.
+   */
+  totalSlots: number;
+  /** Max files being worked on at once. */
+  maxConcurrentFiles: number;
   maxAttempts: number;
   partTimeoutMs: number;
   /** While waiting for the network, probe this often. */
@@ -42,6 +51,8 @@ export interface UploadManagerConfig {
 
 export const DEFAULT_CONFIG: UploadManagerConfig = {
   concurrency: 2,
+  totalSlots: 3,
+  maxConcurrentFiles: 3,
   maxAttempts: 5,
   partTimeoutMs: 120_000,
   heartbeatMs: 30_000,
@@ -91,15 +102,15 @@ function sameUploadView(a: UploadView, b: UploadView): boolean {
  */
 export class UploadManager {
   private files = new Map<string, File>();
-  private active: ActiveState | null = null;
-  private activeId: string | null = null;
+  private active = new Map<string, ActiveState>();
+  private slotsInUse = 0;
+  private slotWaiters: (() => void)[] = [];
   private listeners = new Set<() => void>();
   private uploadsCache = new Map<string, LocalUpload>();
   private partsDoneCache = new Map<string, Set<number>>();
   private consecutiveNetFailures = 0;
   private consecutiveSuccesses = 0;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
-  private scheduling = false;
   private disposed = false;
   private onlineUnsub: (() => void) | null = null;
 
@@ -181,7 +192,7 @@ export class UploadManager {
     this.disposed = true;
     this.onlineUnsub?.();
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
-    this.active?.controller.abort();
+    for (const a of this.active.values()) a.controller.abort();
   }
 
   // ---- public API ----
@@ -205,9 +216,10 @@ export class UploadManager {
       const doneBytes = this.doneBytes(u, done);
       let inflightBytes = 0;
       let speedBps = 0;
-      if (this.activeId === u.localId && this.active) {
-        for (const b of this.active.inflight.values()) inflightBytes += b;
-        speedBps = this.currentSpeed();
+      const a = this.active.get(u.localId);
+      if (a) {
+        for (const b of a.inflight.values()) inflightBytes += b;
+        speedBps = this.speedOf(a);
       }
       const bytesUploaded = Math.min(doneBytes + inflightBytes, u.size);
       const next: UploadView = {
@@ -358,9 +370,7 @@ export class UploadManager {
   async pause(localId: string): Promise<void> {
     const u = this.uploadsCache.get(localId);
     if (!u) return;
-    if (this.activeId === localId) {
-      this.active?.controller.abort();
-    }
+    this.active.get(localId)?.controller.abort();
     if (u.state === 'queued' || u.state === 'uploading' || u.state === 'waiting_network') {
       await this.setUpload(localId, { state: 'paused' });
     }
@@ -383,7 +393,7 @@ export class UploadManager {
   async abort(localId: string): Promise<void> {
     const u = this.uploadsCache.get(localId);
     if (!u) return;
-    if (this.activeId === localId) this.active?.controller.abort();
+    this.active.get(localId)?.controller.abort();
     try {
       await this.api.abortUpload(u.serverUploadId);
     } catch {
@@ -503,25 +513,24 @@ export class UploadManager {
     }, this.config.heartbeatMs);
   }
 
-  private nextRunnable(): LocalUpload | null {
+  /**
+   * Fills the transfer budget: starts uploads (oldest first) until either
+   * `maxConcurrentFiles` are active or nothing is runnable. Called again as
+   * each upload finishes, so spare slots never sit idle while files queue.
+   */
+  private schedule(): void {
+    if (this.disposed) return;
     const candidates = [...this.uploadsCache.values()]
-      .filter((u) => (u.state === 'queued' || u.state === 'uploading') && this.files.has(u.localId))
+      .filter(
+        (u) =>
+          (u.state === 'queued' || u.state === 'uploading') &&
+          this.files.has(u.localId) &&
+          !this.active.has(u.localId),
+      )
       .sort((a, b) => a.createdAt - b.createdAt);
-    return candidates[0] ?? null;
-  }
-
-  private async schedule(): Promise<void> {
-    if (this.scheduling || this.disposed) return;
-    this.scheduling = true;
-    try {
-      // One file at a time; loop until nothing is runnable.
-      for (;;) {
-        const u = this.nextRunnable();
-        if (!u) break;
-        await this.runUpload(u.localId);
-      }
-    } finally {
-      this.scheduling = false;
+    for (const u of candidates) {
+      if (this.active.size >= this.config.maxConcurrentFiles) break;
+      void this.runUpload(u.localId).finally(() => this.schedule());
     }
   }
 
@@ -529,9 +538,42 @@ export class UploadManager {
     return this.consecutiveNetFailures >= 3 ? 1 : this.config.concurrency;
   }
 
-  private currentSpeed(): number {
-    const a = this.active;
-    if (!a || a.samples.length < 2) return 0;
+  private totalSlots(): number {
+    return this.consecutiveNetFailures >= 3 ? 1 : this.config.totalSlots;
+  }
+
+  /** Acquire one global transfer slot; resolves false if aborted while waiting. */
+  private acquireSlot(signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false);
+    if (this.slotsInUse < this.totalSlots()) {
+      this.slotsInUse++;
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      const waiter = () => {
+        signal.removeEventListener('abort', onAbort);
+        this.slotsInUse++;
+        resolve(true);
+      };
+      const onAbort = () => {
+        const i = this.slotWaiters.indexOf(waiter);
+        if (i >= 0) this.slotWaiters.splice(i, 1);
+        resolve(false);
+      };
+      this.slotWaiters.push(waiter);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private releaseSlot(): void {
+    this.slotsInUse = Math.max(0, this.slotsInUse - 1);
+    while (this.slotsInUse < this.totalSlots() && this.slotWaiters.length > 0) {
+      this.slotWaiters.shift()!(); // increments slotsInUse
+    }
+  }
+
+  private speedOf(a: ActiveState): number {
+    if (a.samples.length < 2) return 0;
     const cutoff = Date.now() - 10_000;
     const window = a.samples.filter((s) => s.t >= cutoff);
     const first = window[0];
@@ -540,12 +582,11 @@ export class UploadManager {
     return Math.max(0, ((last.bytes - first.bytes) / (last.t - first.t)) * 1000);
   }
 
-  private noteProgress(): void {
-    const a = this.active;
-    if (!a) return;
-    const u = this.activeId ? this.uploadsCache.get(this.activeId) : null;
-    if (!u) return;
-    const done = this.partsDoneCache.get(u.localId) ?? new Set();
+  private noteProgress(localId: string): void {
+    const a = this.active.get(localId);
+    const u = this.uploadsCache.get(localId);
+    if (!a || !u) return;
+    const done = this.partsDoneCache.get(localId) ?? new Set();
     let bytes = this.doneBytes(u, done);
     for (const b of a.inflight.values()) bytes += b;
     a.samples.push({ t: Date.now(), bytes });
@@ -558,9 +599,11 @@ export class UploadManager {
     const u = this.uploadsCache.get(localId);
     if (!file || !u) return;
 
+    if (this.active.has(localId)) return; // already running
+
     const controller = new AbortController();
-    this.active = { file, controller, inflight: new Map(), samples: [] };
-    this.activeId = localId;
+    const activeState: ActiveState = { file, controller, inflight: new Map(), samples: [] };
+    this.active.set(localId, activeState);
     await this.setUpload(localId, { state: 'uploading', error: undefined });
 
     const done = this.partsDoneCache.get(localId) ?? new Set<number>();
@@ -576,7 +619,19 @@ export class UploadManager {
         if (failure || controller.signal.aborted) return;
         const partNumber = queue.shift();
         if (partNumber === undefined) return;
-        const ok = await this.uploadOnePart(u, file, partNumber, controller.signal);
+        // Each part transfer consumes one global slot, shared across files —
+        // a big file's spare capacity goes to the next files in the queue.
+        const gotSlot = await this.acquireSlot(controller.signal);
+        if (!gotSlot) {
+          queue.unshift(partNumber);
+          return;
+        }
+        let ok: Awaited<ReturnType<UploadManager['uploadOnePart']>>;
+        try {
+          ok = await this.uploadOnePart(u, file, partNumber, controller.signal, activeState);
+        } finally {
+          this.releaseSlot();
+        }
         if (!ok.ok) {
           failure = ok.failure;
           // Put the part back so the resume picks it up.
@@ -586,13 +641,11 @@ export class UploadManager {
       }
     };
 
-    // Start workers respecting (possibly degraded) concurrency. Workers exit
-    // when the queue drains, so extra workers beyond the queue length no-op.
+    // Per-file worker cap; the global slot budget gates actual transfers.
     const workers = Array.from({ length: Math.min(this.effectiveConcurrency(), Math.max(queue.length, 1)) }, worker);
     await Promise.all(workers);
 
-    this.active = null;
-    this.activeId = null;
+    this.active.delete(localId);
 
     if (controller.signal.aborted) {
       // pause() or abort() already set the target state.
@@ -643,6 +696,7 @@ export class UploadManager {
     file: File,
     partNumber: number,
     signal: AbortSignal,
+    activeState: ActiveState,
   ): Promise<{ ok: true } | { ok: false; failure: { kind: 'network' | 'fatal'; message: string } }> {
     const start = (partNumber - 1) * u.partSize;
     const blob = file.slice(start, Math.min(start + u.partSize, u.size));
@@ -657,14 +711,14 @@ export class UploadManager {
           timeoutMs: this.config.partTimeoutMs,
           signal,
           onProgress: (loaded) => {
-            this.active?.inflight.set(partNumber, loaded);
-            this.noteProgress();
+            activeState.inflight.set(partNumber, loaded);
+            this.noteProgress(u.localId);
           },
         });
 
         // Persist locally FIRST: even if everything after this dies, the
         // part is never uploaded again.
-        this.active?.inflight.delete(partNumber);
+        activeState.inflight.delete(partNumber);
         await this.recordPartDone(u.localId, partNumber, etag, blob.size);
         if (this.uploadsCache.get(u.localId)?.error) {
           await this.setUpload(u.localId, { error: undefined });
@@ -673,10 +727,10 @@ export class UploadManager {
         this.consecutiveSuccesses++;
         // Server-side record is best-effort; R2 ListParts is authoritative.
         await this.api.partDone(u.serverUploadId, partNumber, etag, blob.size).catch(() => {});
-        this.noteProgress();
+        this.noteProgress(u.localId);
         return { ok: true };
       } catch (err) {
-        this.active?.inflight.delete(partNumber);
+        activeState.inflight.delete(partNumber);
         if (err instanceof DOMException && err.name === 'AbortError') {
           return { ok: false, failure: { kind: 'network', message: 'aborted' } };
         }

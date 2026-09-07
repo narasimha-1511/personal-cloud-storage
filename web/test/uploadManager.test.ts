@@ -6,6 +6,8 @@ import { MockBackend, makeFile, waitFor } from './mocks';
 
 const FAST: UploadManagerConfig = {
   concurrency: 2,
+  totalSlots: 3,
+  maxConcurrentFiles: 3,
   maxAttempts: 3,
   partTimeoutMs: 1000,
   heartbeatMs: 20,
@@ -155,22 +157,41 @@ describe('UploadManager', () => {
     expect([...backend.uploads.values()][0]!.status).toBe('ABORTED');
   });
 
-  it('queues multiple files and transfers one at a time', async () => {
+  it('never exceeds the global slot budget across multiple files', async () => {
     const backend = new MockBackend();
     const { mgr } = makeManager(backend, newDbName());
     await mgr.init();
-    const a = await mgr.addFile(makeFile(backend.partSize * 3, 'VID_A.MP4'), { projectId: 'p1' });
-    const b = await mgr.addFile(makeFile(backend.partSize * 3, 'VID_B.MP4'), { projectId: 'p1' });
-    await waitFor(
-      () => stateOf(mgr, a)?.state === 'done' && stateOf(mgr, b)?.state === 'done',
-      5000,
-      'both done',
-    );
-    // Interleaving check: all of A's parts arrive before any of B's.
-    const uploadIds = backend.putsReceived.map((p) => p.uploadId);
-    const firstB = uploadIds.indexOf('srv-2');
-    const lastA = uploadIds.lastIndexOf('srv-1');
-    expect(firstB === -1 || lastA < firstB).toBe(true);
+    const files = Array.from({ length: 6 }, (_, i) => makeFile(backend.partSize * 3, `VID_${i}.MP4`));
+    await mgr.addFiles(files.map((file) => ({ file })), { projectId: 'p1' });
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 10_000, 'all done');
+    expect(backend.maxConcurrentPuts).toBeLessThanOrEqual(3); // totalSlots
+    // Every part of every file uploaded exactly once.
+    const counts = new Map<string, number>();
+    for (const p of backend.putsReceived) {
+      const key = `${p.uploadId}:${p.partNumber}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    expect([...counts.values()].every((n) => n === 1)).toBe(true);
+  });
+
+  it('uploads several small files in parallel instead of one at a time', async () => {
+    const backend = new MockBackend();
+    // Slow each PUT down enough that overlap is observable.
+    const origPut = backend.transport.putPart.bind(backend.transport);
+    backend.transport = {
+      putPart: async (url, body, opts) => {
+        await new Promise((r) => setTimeout(r, 25));
+        return origPut(url, body, opts);
+      },
+    };
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+    // 6 single-part files: with 3 global slots these should run 3-wide.
+    const files = Array.from({ length: 6 }, (_, i) => makeFile(backend.partSize, `SMALL_${i}.MP4`));
+    await mgr.addFiles(files.map((file) => ({ file })), { projectId: 'p1' });
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 10_000, 'all small done');
+    expect(backend.maxConcurrentPuts).toBeGreaterThanOrEqual(2);
+    expect(backend.maxConcurrentPuts).toBeLessThanOrEqual(3);
   });
 });
 

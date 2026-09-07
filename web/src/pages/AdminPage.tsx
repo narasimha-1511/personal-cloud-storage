@@ -5,7 +5,7 @@ import { formatDate } from '../lib/format';
 import { useAuth } from '../auth';
 import Layout from '../components/Layout';
 import { Button, Card, Field, InputSheet, Notice, Segmented, Sheet, SheetAction, Spinner, inputClass } from '../components/ui';
-import { IconKey, IconMore, IconUserOff, IconUsers } from '../components/icons';
+import { IconKey, IconLock, IconMore, IconUserOff, IconUsers } from '../components/icons';
 
 type UserRow = UserInfo & { active: boolean };
 
@@ -16,6 +16,7 @@ export default function AdminPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>('user');
+  const [scoped, setScoped] = useState(false);
   const [menuFor, setMenuFor] = useState<UserRow | null>(null);
   const [resetting, setResetting] = useState<UserRow | null>(null);
 
@@ -31,10 +32,11 @@ export default function AdminPage() {
     e.preventDefault();
     setNotice(null);
     try {
-      await api.createUser({ username, password, role });
+      await api.createUser({ username, password, role, scoped: role === 'user' && scoped });
       setUsername('');
       setPassword('');
       setRole('user');
+      setScoped(false);
       load();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not create user');
@@ -68,6 +70,23 @@ export default function AdminPage() {
                 {role === 'admin' ? 'Full access, including user management.' : 'Uploads, downloads, and their own videos.'}
               </span>
             </Field>
+            {role === 'user' && (
+              <Field label="Library access">
+                <Segmented<'all' | 'scoped'>
+                  options={[
+                    { value: 'all', label: 'Everything' },
+                    { value: 'scoped', label: 'Only granted folders' },
+                  ]}
+                  value={scoped ? 'scoped' : 'all'}
+                  onChange={(v) => setScoped(v === 'scoped')}
+                />
+                <span className="mt-1.5 block text-[12px] text-zinc-600">
+                  {scoped
+                    ? 'Sees nothing until you grant folders: folder menu → Who can access.'
+                    : 'Sees all projects and unrestricted folders.'}
+                </span>
+              </Field>
+            )}
             <Button type="submit" kind="primary" full>
               Create account
             </Button>
@@ -89,7 +108,7 @@ export default function AdminPage() {
                     {u.id === me?.id && <span className="ml-1.5 text-xs font-normal text-zinc-500">(you)</span>}
                   </p>
                   <p className="text-[11px] text-zinc-500">
-                    {u.role === 'admin' ? 'Admin' : 'Member'} · since {formatDate(u.createdAt)}
+                    {u.role === 'admin' ? 'Admin' : u.scoped ? 'Folder-only' : 'Member'} · since {formatDate(u.createdAt)}
                     {!u.active && <span className="ml-1.5 font-semibold text-red-400">deactivated</span>}
                   </p>
                 </div>
@@ -116,6 +135,23 @@ export default function AdminPage() {
               setMenuFor(null);
             }}
           />
+          {menuFor?.role === 'user' && (
+            <SheetAction
+              icon={<IconLock size={18} />}
+              label={menuFor.scoped ? 'Give full library access' : 'Limit to granted folders'}
+              sub={menuFor.scoped ? 'Currently sees only granted folders' : 'Will see only folders you grant'}
+              onClick={async () => {
+                const u = menuFor!;
+                setMenuFor(null);
+                try {
+                  await api.setUserScoped(u.id, !u.scoped);
+                  load();
+                } catch (err) {
+                  setNotice(err instanceof Error ? err.message : 'Operation failed');
+                }
+              }}
+            />
+          )}
           {menuFor?.id !== me?.id && (
             <SheetAction
               icon={menuFor?.active ? <IconUserOff size={18} /> : <IconUsers size={18} />}
