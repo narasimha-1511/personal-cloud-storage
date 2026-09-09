@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.5.1',
+    date: '2026-09-09',
+    title: 'Photo grids load properly now',
+    changes: [
+      'Fixed photos that could sit blank for minutes the first time you opened a folder — tiles were quietly downloading the full-size original while their thumbnail was still being made',
+      'A folder now shows placeholders that fill in within seconds instead of competing for your connection',
+      'Scrolling into a new stretch of a big folder makes those photos first, rather than queueing them behind everything above',
+      'The app keeps waiting for slow thumbnails instead of giving up after a minute and leaving tiles empty',
+    ],
+  },
+  {
     version: '2.5.0',
     date: '2026-09-07',
     title: 'Instant photo viewer, much faster grids',

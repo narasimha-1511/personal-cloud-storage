@@ -541,26 +541,33 @@ export default function ProjectPage() {
         if (stale()) return;
         setThumbsExpireAt(Date.parse(r.expiresAt));
         setThumbs((t) => ({ ...t, ...r.urls }));
-        // Only ids the server did NOT report as pending are real thumbnails.
-        const pending = new Set(r.pending);
-        const done = Object.keys(r.urls).filter((id) => !pending.has(id));
-        if (done.length > 0) {
+        // The server names the ids it served a genuine derivative for. Anything
+        // else in `urls` is an original it will never have a thumbnail for, and
+        // must not be treated as a cheap preview.
+        if (r.thumbed.length > 0) {
           setRealThumbs((s) => {
             const next = new Set(s);
-            for (const id of done) next.add(id);
+            for (const id of r.thumbed) next.add(id);
             return next;
           });
         }
-        if (r.pending.length > 0 && attempt < 8) {
-          const delay = Math.min(1000 * 2 ** attempt, 15_000);
+        if (r.pending.length > 0) {
+          // Keep asking until every tile has its thumbnail. There is no attempt
+          // limit on purpose: giving up used to leave those tiles showing a
+          // placeholder indefinitely, because nothing re-triggers this effect
+          // while a user simply looks at the grid. Backing off to a few seconds
+          // keeps a big folder cheap to wait on.
+          const delay = Math.min(700 * 2 ** attempt, 5000);
           const timer = setTimeout(() => {
             thumbTimers.current.delete(timer);
+            // A hidden tab should not poll; the visibility listener restarts it.
+            if (typeof document !== 'undefined' && document.hidden) {
+              for (const id of r.pending) thumbsRequested.current.delete(id);
+              return;
+            }
             void fetchChunk(r.pending, attempt + 1);
           }, delay);
           thumbTimers.current.add(timer);
-        } else if (r.pending.length > 0) {
-          // Gave up waiting; let a later pass (scroll, filter) try again.
-          for (const id of r.pending) thumbsRequested.current.delete(id);
         }
       } catch {
         // Let them be retried on the next pass rather than sticking forever.
@@ -576,6 +583,17 @@ export default function ProjectPage() {
     // it would restart this effect on every response.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, videos, limit, query, statusFilter, typeFilter, sortBy, thumbsExpireAt, thumbEpoch, cacheKey]);
+
+  // Polling stops while the tab is in the background; pick it back up on
+  // return, otherwise tiles left mid-generation would stay blank.
+  useEffect(() => {
+    if (viewMode !== 'grid') return;
+    const onVisible = () => {
+      if (!document.hidden) setThumbEpoch((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [viewMode]);
 
   // Nothing re-runs the effect above while a grid simply sits open, so expiring
   // URLs would quietly become 403s. Nudge it as the hour is nearly up.

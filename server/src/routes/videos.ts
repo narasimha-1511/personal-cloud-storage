@@ -89,6 +89,7 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
     const wantThumb = body.data.variant === 'thumb';
 
     const urls: Record<string, string> = {};
+    const thumbed: string[] = [];
     const visible: (typeof videos.$inferSelect)[] = [];
     for (const id of [...new Set(body.data.ids)]) {
       const row = await loadVideo(id);
@@ -96,9 +97,16 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
       if (!(await canSeeVideo(db, user, row.video))) continue;
       visible.push(row.video);
 
-      // A thumb when one exists; otherwise the original, so the tile still
-      // shows something while generation catches up.
       const thumbKey = wantThumb ? thumbnailer.keyFor(row.video) : null;
+      // While a derivative is still being generated we return NO url for it.
+      // Handing back the original instead looks helpful but is the opposite:
+      // a first visit to a folder would pull a multi-megabyte file per tile —
+      // measured at 69 MB for 24 tiles — saturating the browser's handful of
+      // connections so that some tiles take minutes while others appear at
+      // once. A placeholder now and a 25 KB thumbnail in a moment is better.
+      if (wantThumb && !thumbKey && thumbnailer.willGenerate(row.video)) continue;
+
+      if (thumbKey) thumbed.push(id);
       urls[id] = await r2.signGetUrl(thumbKey ?? row.video.objectKey, env.VIEW_URL_TTL_SECONDS, {
         filename: row.video.displayName,
         disposition: 'inline',
@@ -111,6 +119,7 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
     return c.json({
       urls,
       pending,
+      thumbed,
       expiresAt: new Date(Date.now() + env.VIEW_URL_TTL_SECONDS * 1000).toISOString(),
     });
   });

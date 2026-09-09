@@ -199,10 +199,17 @@ export interface ViewUrlsResponse {
   /** id -> signed URL. Falls back to the original when no thumbnail exists yet. */
   urls: Record<string, string>;
   /**
-   * Ids whose thumbnail is still being generated. Ask again shortly and the
-   * URL will point at the derivative instead of the original.
+   * Ids whose thumbnail is still being generated. These carry no entry in
+   * `urls` at all — serving the original in the meantime would cost several
+   * megabytes per grid tile. Ask again shortly.
    */
   pending: string[];
+  /**
+   * Ids in `urls` whose URL is a genuine thumbnail. Anything in `urls` but not
+   * here is the original, served because no derivative can be produced for it
+   * (an undecodable codec, an oversized source, or a non-image file).
+   */
+  thumbed: string[];
   expiresAt: string;
 }
 

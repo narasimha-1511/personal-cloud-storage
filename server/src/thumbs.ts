@@ -8,6 +8,13 @@ import { log } from './log.js';
 
 type VideoRow = typeof videos.$inferSelect;
 
+// libvips defaults to caching decoded images and to one worker thread per core.
+// Neither helps here — every photo is processed exactly once — and both make
+// peak memory unpredictable on a small VPS shared with the upload path.
+// THUMB_CONCURRENCY is then the only knob that governs memory.
+sharp.cache(false);
+sharp.concurrency(1);
+
 export interface Thumbnailer {
   /**
    * Queues thumbnail generation for any of these rows that still needs it.
@@ -17,6 +24,12 @@ export interface Thumbnailer {
   request(rows: VideoRow[]): string[];
   /** Key for a row's thumbnail, or null if there is nothing usable yet. */
   keyFor(row: VideoRow): string | null;
+  /**
+   * Whether a derivative for this row is coming. False means the caller should
+   * serve the original instead — the file is not an image, generation is
+   * switched off, or it has been ruled out permanently.
+   */
+  willGenerate(row: VideoRow): boolean;
   /** Awaits the current queue. Tests only — production never blocks on this. */
   idle(): Promise<void>;
 }
@@ -47,8 +60,18 @@ export function createThumbnailer({
   r2: R2Client | null;
   env: Env;
 }): Thumbnailer {
+  /** Ids waiting to be generated, most important first. */
   const queue: string[] = [];
-  const known = new Set<string>();
+  /** Queued but not started — these can still be re-prioritized. */
+  const queued = new Set<string>();
+  /** Currently generating; re-requesting one of these changes nothing. */
+  const active = new Set<string>();
+  /**
+   * Ceiling on outstanding work. A very large folder would otherwise let one
+   * client enqueue tens of thousands of jobs; anything trimmed is simply
+   * re-requested the next time it is actually on screen.
+   */
+  const MAX_QUEUE = 2000;
   /**
    * Failures per id this process has seen. A missing original or a wedged
    * bucket would otherwise be re-queued by every single grid render — each
@@ -70,12 +93,14 @@ export function createThumbnailer({
   function pump(): void {
     while (running < env.THUMB_CONCURRENCY && queue.length > 0) {
       const id = queue.shift()!;
+      queued.delete(id);
+      active.add(id);
       running++;
       void generate(id)
         .catch(() => {})
         .finally(() => {
           running--;
-          known.delete(id);
+          active.delete(id);
           pump();
           settleIfIdle();
         });
@@ -143,19 +168,45 @@ export function createThumbnailer({
       return row.thumbState === 'READY' && row.thumbKey ? row.thumbKey : null;
     },
 
+    willGenerate(row) {
+      if (!r2 || !env.THUMBNAILS_ENABLED) return false;
+      if (!isThumbnailable(row)) return false;
+      // Terminal: nothing will ever be produced for this one.
+      return row.thumbState !== 'UNSUPPORTED';
+    },
+
+    /**
+     * Rows arrive in the caller's priority order — the client asks for the
+     * files it is currently showing — and that order wins. Work already queued
+     * but not started is pushed behind it, so scrolling into a new stretch of a
+     * folder generates those photos next instead of putting them behind every
+     * photo requested earlier. Jobs already running are left alone.
+     */
     request(rows) {
       const pending: string[] = [];
       if (!r2 || !env.THUMBNAILS_ENABLED) return pending;
+
+      const promoted: string[] = [];
       for (const row of rows) {
         if (!isThumbnailable(row)) continue;
         if (row.thumbState === 'READY' && row.thumbKey) continue;
-        // UNSUPPORTED is terminal — the caller falls back to the original.
         if (row.thumbState === 'UNSUPPORTED') continue;
         pending.push(row.id);
-        if (known.has(row.id)) continue;
-        known.add(row.id);
-        queue.push(row.id);
+        if (active.has(row.id)) continue;
+        promoted.push(row.id);
       }
+
+      if (promoted.length > 0) {
+        const front = new Set(promoted);
+        const rest = queue.filter((id) => !front.has(id));
+        queue.length = 0;
+        for (const id of promoted) queue.push(id);
+        for (const id of rest) queue.push(id);
+        if (queue.length > MAX_QUEUE) queue.length = MAX_QUEUE;
+        queued.clear();
+        for (const id of queue) queued.add(id);
+      }
+
       pump();
       return pending;
     },
