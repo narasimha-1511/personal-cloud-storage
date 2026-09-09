@@ -53,24 +53,52 @@ export default function Lightbox({
     [index, items.length, onIndex],
   );
 
-  // Sign the current file and its immediate neighbours, so a click on the
-  // arrow shows the next photo rather than a spinner.
+  /**
+   * Resolve a URL to display for one file, and its immediate neighbours so a
+   * click on the arrow shows the next photo rather than a spinner.
+   *
+   * Images are shown as their display-sized derivative, never the original: a
+   * 40 MP phone photo is several megabytes to fetch and ~160 MB to decode,
+   * which is slow on a laptop and painful on a phone. If that copy does not
+   * exist yet the request itself queues it, so we wait briefly and only fall
+   * back to the original if it really has not arrived. Videos and other files
+   * always stream the original.
+   */
   useEffect(() => {
     let cancelled = false;
-    const wanted = [items[index], items[index - 1], items[index + 1]].filter(
-      (v): v is VideoInfo => !!v && !urls[v.id] && !inFlight.current.has(v.id),
-    );
-    for (const v of wanted) {
-      inFlight.current.add(v.id);
-      api
-        .viewUrl(v.id)
-        .then((r) => {
+
+    const resolve = async (v: VideoInfo, attempt = 0): Promise<void> => {
+      if (cancelled) return;
+      try {
+        if (kindOf(v) !== 'image') {
+          const r = await api.viewUrl(v.id);
           if (!cancelled) setUrls((u) => ({ ...u, [v.id]: r.url }));
-        })
-        .catch(() => {
-          inFlight.current.delete(v.id);
-          if (!cancelled && v.id === items[index]?.id) onError('Could not open this file');
-        });
+          return;
+        }
+        const r = await api.viewUrls([v.id], 'preview');
+        const url = r.urls[v.id];
+        if (url) {
+          if (!cancelled) setUrls((u) => ({ ...u, [v.id]: url }));
+          return;
+        }
+        // Still being generated. Give it a few seconds — the thumbnail is on
+        // screen meanwhile — then take the original rather than hang.
+        if (r.pending.includes(v.id) && attempt < 4) {
+          await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+          return resolve(v, attempt + 1);
+        }
+        const fallback = await api.viewUrl(v.id);
+        if (!cancelled) setUrls((u) => ({ ...u, [v.id]: fallback.url }));
+      } catch {
+        inFlight.current.delete(v.id);
+        if (!cancelled && v.id === items[index]?.id) onError('Could not open this file');
+      }
+    };
+
+    for (const v of [items[index], items[index - 1], items[index + 1]]) {
+      if (!v || urls[v.id] || inFlight.current.has(v.id)) continue;
+      inFlight.current.add(v.id);
+      void resolve(v);
     }
     return () => {
       cancelled = true;
@@ -205,15 +233,20 @@ export default function Lightbox({
           {kind === 'image' && (
             // The grid's thumbnail stands in — upscaled and softened — until the
             // original has decoded, so opening a photo is never a blank wait.
-            // `key` keeps each file's elements distinct so the previous photo
-            // cannot linger over the next one.
-            <div key={current.id} className="pointer-events-auto relative flex max-h-full max-w-full">
+            //
+            // Both images fill the same box and are laid out with object-contain,
+            // so the 512px stand-in occupies exactly the rectangle the original
+            // will. Sizing the box to its content instead would render the
+            // stand-in at its own small natural size and then visibly jump when
+            // the original arrived. `key` keeps each file's elements distinct so
+            // the previous photo cannot linger over the next one.
+            <div key={current.id} className="pointer-events-auto relative h-full w-full">
               {preview && !full && (
                 <img
                   src={preview}
                   alt=""
                   aria-hidden
-                  className="max-h-full max-w-full scale-[1.01] object-contain blur-[2px]"
+                  className="absolute inset-0 h-full w-full scale-[1.01] object-contain blur-[2px]"
                 />
               )}
               {url && (
@@ -221,13 +254,13 @@ export default function Lightbox({
                   src={url}
                   alt={current.displayName}
                   decoding="async"
-                  className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
-                    full ? 'opacity-100' : 'absolute inset-0 h-full w-full opacity-0'
+                  className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${
+                    full ? 'opacity-100' : 'opacity-0'
                   }`}
                 />
               )}
               {!full && (
-                <span className="absolute bottom-2 right-2 text-zinc-400">
+                <span className="absolute bottom-0 right-0 text-zinc-400">
                   <IconSpinner size={18} />
                 </span>
               )}

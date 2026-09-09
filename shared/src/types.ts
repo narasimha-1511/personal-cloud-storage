@@ -192,8 +192,15 @@ export interface SignedUrlResponse {
   expiresAt: string;
 }
 
-/** 'thumb' asks for the small grid derivative instead of the original file. */
-export type ViewUrlVariant = 'original' | 'thumb';
+/**
+ * Which copy of a file to sign a URL for:
+ * - 'thumb'    small grid tile (~25 KB)
+ * - 'preview'  display-sized copy for the viewer (~2048px), instead of a
+ *              40 MP original that costs megabytes to fetch and hundreds of
+ *              megabytes to decode
+ * - 'original' the untouched file, as uploaded
+ */
+export type ViewUrlVariant = 'original' | 'thumb' | 'preview';
 
 export interface ViewUrlsResponse {
   /** id -> signed URL. Falls back to the original when no thumbnail exists yet. */

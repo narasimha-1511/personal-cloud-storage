@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.5.2',
+    date: '2026-09-09',
+    title: 'Opening a photo is fast now',
+    changes: [
+      'Opening a photo no longer downloads the full-resolution original — a 40 MP drone shot took several megabytes and a lot of your device’s memory just to look at',
+      'The viewer now loads a display-sized copy instead, so photos appear almost immediately and stepping through a folder stays quick',
+      'Download still gives you the untouched original, bit for bit',
+      'The blurred preview now fills the screen at the right size instead of appearing small and then jumping when the sharp version arrived',
+    ],
+  },
+  {
     version: '2.5.1',
     date: '2026-09-09',
     title: 'Photo grids load properly now',

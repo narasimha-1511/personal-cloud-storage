@@ -34,6 +34,10 @@ const envSchema = z.object({
     .transform((v) => (typeof v === 'boolean' ? v : v !== 'false' && v !== '0')),
   THUMB_MAX_EDGE: z.coerce.number().int().min(64).max(2048).default(512),
   THUMB_QUALITY: z.coerce.number().int().min(1).max(100).default(72),
+  // The viewer's display copy. A 40 MP original is ~4.5 MB to fetch and ~160 MB
+  // to decode; 2048px is sharp on any screen at a fraction of the cost.
+  PREVIEW_MAX_EDGE: z.coerce.number().int().min(512).max(6000).default(2048),
+  PREVIEW_QUALITY: z.coerce.number().int().min(1).max(100).default(82),
   THUMB_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
   THUMB_MAX_SOURCE_BYTES: z.coerce
     .number()

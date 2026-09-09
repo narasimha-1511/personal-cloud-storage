@@ -55,6 +55,8 @@ Repo layout: `server/` (Hono API, Drizzle + SQLite), `web/` (React PWA), `shared
 | `THUMB_QUALITY` | no | `72` | WebP quality for thumbnails |
 | `THUMB_CONCURRENCY` | no | `2` | Photos decoded at once — each costs real memory |
 | `THUMB_MAX_SOURCE_BYTES` | no | `41943040` (40 MB) | Originals above this are served as-is |
+| `PREVIEW_MAX_EDGE` | no | `2048` | Longest edge of the viewer's display copy, in px |
+| `PREVIEW_QUALITY` | no | `82` | WebP quality for the viewer's display copy |
 
 Secrets never reach the browser; the frontend has no environment at all.
 
@@ -66,9 +68,20 @@ in a grid the server generates a small WebP with [sharp], stores it in R2 beside
 the original (`thumbs/<id>.webp`), and serves that from then on: roughly 25 KB
 per tile instead of several megabytes.
 
+Each image also gets a display-sized copy (`previews/<id>.webp`, long edge
+`PREVIEW_MAX_EDGE`) which is what the viewer shows. Handing over the original
+there is expensive for the same reason: a 40 MP photo is several megabytes to
+fetch and roughly 160 MB to decode in RAM. Downloads are untouched — they always
+serve the original, bit for bit. Both derivatives come out of a single decode of
+the source, and the tile is derived from the display copy rather than decoding
+the original twice.
+
 Generation is lazy and happens once per photo, so an existing library backfills
-itself as folders are browsed. While a derivative is still being made the
-original is served, so tiles are never blank. Codecs libvips cannot decode
+itself as folders are browsed, prioritised by what the client last asked for
+(i.e. what is on screen). While a derivative is still being made the API returns
+**no URL** for that file and the tile shows a placeholder — serving the original
+as a stand-in was measured at 69 MB for 24 tiles, which saturates the browser's
+connections and makes some tiles take minutes. Codecs libvips cannot decode
 (HEIC, some RAW) are marked unsupported and always fall back to the original.
 
 `sharp` ships a platform-specific native binary and adds ~50 MB to the image. It
@@ -111,7 +124,7 @@ npm run dev                        # server on :8787, Vite on :5173 (proxies /ap
 
 Open http://localhost:5173, log in with the seeded admin. Without R2 credentials everything works except transfers. Fully offline option: `docker compose up` runs the app + MinIO standing in for R2.
 
-Checks: `npm run check` = typecheck + lint + tests (46) + build. Individual: `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
+Checks: `npm run check` = typecheck + lint + tests (84) + build. Individual: `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
 
 ## 6. Deploying on Coolify
 

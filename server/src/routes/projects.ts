@@ -23,7 +23,7 @@ export interface ProjectRouteDeps {
 export async function deleteVideoStorage(
   db: Db,
   r2: R2Client | null,
-  video: { id: string; objectKey: string; thumbKey?: string | null },
+  video: { id: string; objectKey: string; thumbKey?: string | null; previewKey?: string | null },
 ): Promise<void> {
   if (!r2) return;
   const live = await db
@@ -36,8 +36,9 @@ export async function deleteVideoStorage(
     }
   }
   await r2.deleteObject(video.objectKey).catch(() => {});
-  // The generated derivative would otherwise be orphaned in the bucket.
+  // The generated derivatives would otherwise be orphaned in the bucket.
   if (video.thumbKey) await r2.deleteObject(video.thumbKey).catch(() => {});
+  if (video.previewKey) await r2.deleteObject(video.previewKey).catch(() => {});
 }
 
 export function projectRoutes({ db, r2 }: ProjectRouteDeps) {

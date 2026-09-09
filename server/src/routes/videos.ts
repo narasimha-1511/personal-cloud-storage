@@ -80,13 +80,18 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
     const body = z
       .object({
         ids: z.array(z.string().min(1)).min(1).max(200),
-        /** 'thumb' serves the small derivative used by grid tiles. */
-        variant: z.enum(['original', 'thumb']).default('original'),
+        /**
+         * 'thumb' serves the small derivative used by grid tiles; 'preview'
+         * serves the display-sized copy the viewer shows instead of a 40 MP
+         * original. 'original' is the untouched file.
+         */
+        variant: z.enum(['original', 'thumb', 'preview']).default('original'),
       })
       .safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'Invalid request' }, 400);
     const user = c.get('user');
-    const wantThumb = body.data.variant === 'thumb';
+    const variant = body.data.variant;
+    const wantDerivative = variant === 'thumb' || variant === 'preview';
 
     const urls: Record<string, string> = {};
     const thumbed: string[] = [];
@@ -97,17 +102,17 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
       if (!(await canSeeVideo(db, user, row.video))) continue;
       visible.push(row.video);
 
-      const thumbKey = wantThumb ? thumbnailer.keyFor(row.video) : null;
+      const derivedKey = wantDerivative ? thumbnailer.keyFor(row.video, variant) : null;
       // While a derivative is still being generated we return NO url for it.
       // Handing back the original instead looks helpful but is the opposite:
       // a first visit to a folder would pull a multi-megabyte file per tile —
       // measured at 69 MB for 24 tiles — saturating the browser's handful of
       // connections so that some tiles take minutes while others appear at
       // once. A placeholder now and a 25 KB thumbnail in a moment is better.
-      if (wantThumb && !thumbKey && thumbnailer.willGenerate(row.video)) continue;
+      if (wantDerivative && !derivedKey && thumbnailer.willGenerate(row.video)) continue;
 
-      if (thumbKey) thumbed.push(id);
-      urls[id] = await r2.signGetUrl(thumbKey ?? row.video.objectKey, env.VIEW_URL_TTL_SECONDS, {
+      if (derivedKey) thumbed.push(id);
+      urls[id] = await r2.signGetUrl(derivedKey ?? row.video.objectKey, env.VIEW_URL_TTL_SECONDS, {
         filename: row.video.displayName,
         disposition: 'inline',
       });
@@ -115,7 +120,7 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
 
     // Kick off any missing derivatives and tell the client which ids are worth
     // asking about again.
-    const pending = wantThumb ? thumbnailer.request(visible) : [];
+    const pending = wantDerivative ? thumbnailer.request(visible) : [];
     return c.json({
       urls,
       pending,

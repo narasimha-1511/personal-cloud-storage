@@ -141,6 +141,88 @@ describe('grid thumbnails', () => {
     expect(row.thumbState).toBe('UNSUPPORTED');
   });
 
+  it('also makes a display-sized copy so the viewer never loads a 40 MP original', async () => {
+    const t = await createTestApp();
+    const cookie = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+    // Roughly the shape of the user's drone photos: 40 MP.
+    const id = await seedImage(t, await ownerIdOf(t, 'narasimha'), projectId, {
+      bytes: await jpeg(7296, 5472),
+    });
+
+    await t.app.request('/api/videos/view-urls', post({ ids: [id], variant: 'preview' }, cookie));
+    await t.thumbnailer.idle();
+
+    const row = (await t.db.select().from(videos).where(eq(videos.id, id)).limit(1))[0]!;
+    expect(row.thumbState).toBe('READY');
+    expect(row.thumbKey).toBe(`thumbs/${id}.webp`);
+    expect(row.previewKey).toBe(`previews/${id}.webp`);
+
+    const preview = await t.r2.getObject(row.previewKey!);
+    const thumb = await t.r2.getObject(row.thumbKey!);
+    const original = await t.r2.getObject(row.objectKey);
+
+    const pMeta = await sharp(preview).metadata();
+    expect(pMeta.format).toBe('webp');
+    expect(Math.max(pMeta.width ?? 0, pMeta.height ?? 0)).toBe(t.env.PREVIEW_MAX_EDGE);
+    // Big enough to look sharp, but a fraction of the original's bytes and a
+    // tiny fraction of its decode cost.
+    expect(preview.length).toBeGreaterThan(thumb.length);
+    expect(preview.length).toBeLessThan(original.length / 2);
+    expect((pMeta.width ?? 0) * (pMeta.height ?? 0)).toBeLessThan(7296 * 5472 / 8);
+
+    const res = await t.app.request('/api/videos/view-urls', post({ ids: [id], variant: 'preview' }, cookie));
+    const body = (await res.json()) as { urls: Record<string, string>; pending: string[]; thumbed: string[] };
+    expect(body.pending).toEqual([]);
+    expect(body.urls[id]).toContain('previews');
+    expect(body.thumbed).toEqual([id]);
+
+    // The three variants are genuinely different objects.
+    const asThumb = await t.app.request('/api/videos/view-urls', post({ ids: [id], variant: 'thumb' }, cookie));
+    expect(((await asThumb.json()) as { urls: Record<string, string> }).urls[id]).toContain('thumbs');
+    const asOriginal = await t.app.request('/api/videos/view-urls', post({ ids: [id] }, cookie));
+    expect(((await asOriginal.json()) as { urls: Record<string, string> }).urls[id]).toContain('videos');
+  });
+
+  it('backfills a display copy for images thumbnailed before previews existed', async () => {
+    const t = await createTestApp();
+    const cookie = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+    const id = await seedImage(t, await ownerIdOf(t, 'narasimha'), projectId);
+
+    // Exactly the state left by the previous release: a thumbnail, no preview.
+    await t.db
+      .update(videos)
+      .set({ thumbState: 'READY', thumbKey: `thumbs/${id}.webp`, previewKey: null })
+      .where(eq(videos.id, id));
+
+    const res = await t.app.request('/api/videos/view-urls', post({ ids: [id], variant: 'preview' }, cookie));
+    const body = (await res.json()) as { pending: string[] };
+    expect(body.pending).toEqual([id]);
+
+    await t.thumbnailer.idle();
+    const row = (await t.db.select().from(videos).where(eq(videos.id, id)).limit(1))[0]!;
+    expect(row.previewKey).toBe(`previews/${id}.webp`);
+    expect(row.thumbState).toBe('READY');
+  });
+
+  it('deletes both derivatives when the file is deleted', async () => {
+    const t = await createTestApp();
+    const cookie = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+    const id = await seedImage(t, await ownerIdOf(t, 'narasimha'), projectId);
+
+    await t.app.request('/api/videos/view-urls', post({ ids: [id], variant: 'preview' }, cookie));
+    await t.thumbnailer.idle();
+    expect(t.r2.objects.has(`thumbs/${id}.webp`)).toBe(true);
+    expect(t.r2.objects.has(`previews/${id}.webp`)).toBe(true);
+
+    const del = await t.app.request(`/api/videos/${id}/delete`, post(undefined, cookie));
+    expect(del.status).toBe(200);
+    expect(t.r2.objects.has(`thumbs/${id}.webp`)).toBe(false);
+    expect(t.r2.objects.has(`previews/${id}.webp`)).toBe(false);
+  });
+
   it('never hands a grid the full original while a thumbnail is being generated', async () => {
     const t = await createTestApp();
     const cookie = await t.loginAs('narasimha', 'admin');

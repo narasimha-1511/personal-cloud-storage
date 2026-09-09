@@ -81,9 +81,11 @@ export const videos = sqliteTable(
     status: text('status', { enum: ['UPLOADING', 'READY', 'ABORTED', 'FAILED'] }).notNull(),
     // Hidden files are visible only to their owner and admins.
     hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
-    // Small WebP derivative for grid tiles, generated lazily on first view.
-    // Null state means generation has not been attempted yet.
+    // WebP derivatives generated lazily on first view, both from one decode of
+    // the source: a small one for grid tiles and a display-sized one for the
+    // viewer. thumbState governs the pair; null means never attempted.
     thumbKey: text('thumb_key'),
+    previewKey: text('preview_key'),
     thumbState: text('thumb_state', { enum: ['PENDING', 'READY', 'UNSUPPORTED', 'FAILED'] }),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),

@@ -15,17 +15,20 @@ type VideoRow = typeof videos.$inferSelect;
 sharp.cache(false);
 sharp.concurrency(1);
 
+/** Which derivative a caller wants: a grid tile or the viewer's display copy. */
+export type Derivative = 'thumb' | 'preview';
+
 export interface Thumbnailer {
   /**
-   * Queues thumbnail generation for any of these rows that still needs it.
-   * Returns the ids that will not have a thumbnail on this request, so the
-   * caller can tell the client to ask again shortly.
+   * Queues generation for any of these rows that still needs it. Returns the
+   * ids that will not have their derivatives on this request, so the caller can
+   * tell the client to ask again shortly.
    */
   request(rows: VideoRow[]): string[];
-  /** Key for a row's thumbnail, or null if there is nothing usable yet. */
-  keyFor(row: VideoRow): string | null;
+  /** Key for one of a row's derivatives, or null if there is nothing usable. */
+  keyFor(row: VideoRow, which: Derivative): string | null;
   /**
-   * Whether a derivative for this row is coming. False means the caller should
+   * Whether derivatives for this row are coming. False means the caller should
    * serve the original instead — the file is not an image, generation is
    * switched off, or it has been ruled out permanently.
    */
@@ -38,8 +41,23 @@ export function thumbKeyFor(videoId: string): string {
   return `thumbs/${videoId}.webp`;
 }
 
+export function previewKeyFor(videoId: string): string {
+  return `previews/${videoId}.webp`;
+}
+
 export function isThumbnailable(row: Pick<VideoRow, 'status' | 'mimeType'>): boolean {
   return row.status === 'READY' && row.mimeType.startsWith('image/');
+}
+
+/**
+ * True when a row still owes us work. Rows generated before display previews
+ * existed are READY with a thumbnail but no preview, so they are re-generated
+ * the next time they are looked at.
+ */
+function needsWork(row: VideoRow): boolean {
+  if (!isThumbnailable(row)) return false;
+  if (row.thumbState === 'UNSUPPORTED') return false;
+  return !(row.thumbState === 'READY' && row.thumbKey && row.previewKey);
 }
 
 /**
@@ -111,35 +129,59 @@ export function createThumbnailer({
   async function generate(id: string): Promise<void> {
     const rows = await db.select().from(videos).where(eq(videos.id, id)).limit(1);
     const row = rows[0];
-    if (!row || !r2 || !isThumbnailable(row)) return;
-    if (row.thumbState === 'READY' || row.thumbState === 'UNSUPPORTED') return;
+    if (!row || !r2 || !needsWork(row)) return;
 
-    const finish = async (state: 'READY' | 'UNSUPPORTED' | 'FAILED', key: string | null) => {
+    const finish = async (
+      state: 'READY' | 'UNSUPPORTED' | 'FAILED',
+      keys: { thumbKey: string | null; previewKey: string | null },
+    ) => {
       await db
         .update(videos)
-        .set({ thumbState: state, thumbKey: key, updatedAt: new Date().toISOString() })
+        .set({ thumbState: state, ...keys, updatedAt: new Date().toISOString() })
         .where(eq(videos.id, id));
     };
+    const giveUp = (state: 'UNSUPPORTED' | 'FAILED') => finish(state, { thumbKey: null, previewKey: null });
 
     // Guard the box before decoding: a huge source would blow past the memory
     // budget for a tile nobody will look at closely.
     if (row.size > env.THUMB_MAX_SOURCE_BYTES) {
-      await finish('UNSUPPORTED', null);
+      await giveUp('UNSUPPORTED');
       return;
     }
 
     try {
       const source = await r2.getObject(row.objectKey);
-      const out = await sharp(source, { limitInputPixels: 300_000_000, failOn: 'none' })
+
+      // Decode the source once, for the larger output only, then derive the
+      // tile from that result. Decoding a 40 MP JPEG is by far the most
+      // expensive step here, and running two pipelines over the same source
+      // pays it twice; re-scaling an already-small 2048px image is trivial by
+      // comparison and visually indistinguishable at tile size.
+      const preview = await sharp(source, { limitInputPixels: 300_000_000, failOn: 'none' })
         // No-arg rotate applies EXIF orientation, so phone photos are upright.
         .rotate()
+        .resize(env.PREVIEW_MAX_EDGE, env.PREVIEW_MAX_EDGE, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: env.PREVIEW_QUALITY, effort: 4 })
+        .toBuffer();
+
+      const thumb = await sharp(preview)
         .resize(env.THUMB_MAX_EDGE, env.THUMB_MAX_EDGE, { fit: 'inside', withoutEnlargement: true })
         .webp({ quality: env.THUMB_QUALITY, effort: 4 })
         .toBuffer();
-      const key = thumbKeyFor(id);
-      await r2.putObject(key, out, 'image/webp');
-      await finish('READY', key);
-      log({ op: 'thumb.generate', ok: true, videoId: id, bytes: out.length, sourceBytes: row.size });
+
+      const thumbKey = thumbKeyFor(id);
+      const previewKey = previewKeyFor(id);
+      await r2.putObject(thumbKey, thumb, 'image/webp');
+      await r2.putObject(previewKey, preview, 'image/webp');
+      await finish('READY', { thumbKey, previewKey });
+      log({
+        op: 'thumb.generate',
+        ok: true,
+        videoId: id,
+        bytes: thumb.length,
+        previewBytes: preview.length,
+        sourceBytes: row.size,
+      });
     } catch (err) {
       // A codec libvips cannot read (HEIC, some RAW) will never succeed, so it
       // is marked UNSUPPORTED and never retried; anything else may be
@@ -151,7 +193,7 @@ export function createThumbnailer({
       // Give up permanently once a source has failed repeatedly — whatever is
       // wrong with it is not going to fix itself on the next grid render.
       const terminal = unsupported || count >= MAX_FAILURES;
-      await finish(terminal ? 'UNSUPPORTED' : 'FAILED', null).catch(() => {});
+      await giveUp(terminal ? 'UNSUPPORTED' : 'FAILED').catch(() => {});
       log({
         op: 'thumb.generate',
         ok: false,
@@ -164,8 +206,9 @@ export function createThumbnailer({
   }
 
   return {
-    keyFor(row) {
-      return row.thumbState === 'READY' && row.thumbKey ? row.thumbKey : null;
+    keyFor(row, which) {
+      if (row.thumbState !== 'READY') return null;
+      return (which === 'thumb' ? row.thumbKey : row.previewKey) ?? null;
     },
 
     willGenerate(row) {
@@ -188,9 +231,7 @@ export function createThumbnailer({
 
       const promoted: string[] = [];
       for (const row of rows) {
-        if (!isThumbnailable(row)) continue;
-        if (row.thumbState === 'READY' && row.thumbKey) continue;
-        if (row.thumbState === 'UNSUPPORTED') continue;
+        if (!needsWork(row)) continue;
         pending.push(row.id);
         if (active.has(row.id)) continue;
         promoted.push(row.id);

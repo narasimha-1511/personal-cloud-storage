@@ -1,0 +1,11 @@
+-- The viewer was serving the untouched original: a 40 MP phone/drone photo is
+-- ~4.5 MB to download and ~160 MB to decode in RAM, which is slow everywhere
+-- and close to unusable on a phone. Each image now also gets a display-sized
+-- derivative (long edge ~2048px, a couple of hundred KB) that the viewer shows
+-- instead. Downloads still hand over the bit-exact original.
+--
+-- Both derivatives come out of a single decode of the source, so thumb_state
+-- governs the pair: when it is READY, both thumb_key and preview_key are set.
+-- Rows generated before this migration have thumb_key but a NULL preview_key,
+-- and are re-generated the next time they are viewed.
+ALTER TABLE videos ADD COLUMN preview_key TEXT;
