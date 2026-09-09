@@ -39,8 +39,41 @@ root.route('/', api);
 // in dev, Vite serves the frontend and proxies /api here.
 const staticDir = ['./public', '../web/dist'].find((d) => existsSync(d));
 if (staticDir) {
+  /**
+   * Caching rules, which matter because a CDN sits in front of this in
+   * production.
+   *
+   * Build outputs under /assets carry a content hash in their filename, so they
+   * are safe to cache forever. index.html is the opposite: it names the current
+   * hashed bundle, so an edge that holds it for hours will keep handing out a
+   * document pointing at a bundle the next deploy has already deleted.
+   */
+  root.use('/assets/*', async (c, next) => {
+    await next();
+    if (c.res.ok) c.res.headers.set('cache-control', 'public, max-age=31536000, immutable');
+  });
+  root.use('/*', async (c, next) => {
+    await next();
+    if (c.res.ok && c.res.headers.get('content-type')?.includes('text/html')) {
+      c.res.headers.set('cache-control', 'no-cache');
+    }
+  });
+
   root.use('/*', serveStatic({ root: staticDir }));
-  // SPA fallback: any non-API, non-file route serves index.html.
+
+  /**
+   * SPA fallback: client-side routes such as /p/:id must return the app shell.
+   *
+   * Requests that look like a file must NOT. Answering a missing
+   * /assets/index-OLD.js with index.html returns HTML, at status 200, under a
+   * .js URL — which a CDN caches for hours and browsers then try to execute as
+   * JavaScript, leaving a white screen until it expires. A real 404 lets the
+   * browser fail loudly and the edge cache stay clean.
+   */
+  root.get('/*', async (c, next) => {
+    if (/\.[a-z0-9]+$/i.test(c.req.path)) return c.text('Not found', 404);
+    return next();
+  });
   root.get('/*', serveStatic({ root: staticDir, path: 'index.html' }));
 }
 

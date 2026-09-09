@@ -14,6 +14,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.5.3',
+    date: '2026-09-09',
+    title: 'No more blank page after an update',
+    changes: [
+      'Fixed a caching problem that could leave the app showing a blank page for a few hours after a new version was deployed',
+      'The page itself is no longer cached by the CDN, so a new version is picked up immediately instead of being served a stale reference to it',
+    ],
+  },
+  {
     version: '2.5.2',
     date: '2026-09-09',
     title: 'Opening a photo is fast now',

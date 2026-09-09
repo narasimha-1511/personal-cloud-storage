@@ -90,6 +90,21 @@ are needed on `node:22-slim`.
 
 [sharp]: https://sharp.pixelplumbing.com
 
+### Static asset caching (important behind a CDN)
+
+`/assets/*` filenames carry a content hash, so they are served
+`max-age=31536000, immutable`. `index.html` names the current bundle and is
+served `no-cache`, so an edge cannot keep handing out a document that points at
+a bundle a later deploy has replaced.
+
+A request for a file that does not exist returns a real **404**, never
+`index.html`. The SPA fallback only applies to extensionless paths (client
+routes like `/p/:id`). This matters: answering a missing
+`/assets/index-OLD.js` with `index.html` returns HTML at status 200 under a
+`.js` URL, which Cloudflare caches for hours and browsers then try to execute as
+JavaScript — a blank page until the entry expires. If that ever happens, purge
+the CDN cache for the affected URL.
+
 ## 3. Cloudflare R2 setup (once)
 
 ```sh
