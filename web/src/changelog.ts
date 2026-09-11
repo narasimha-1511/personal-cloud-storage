@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.6.0',
+    date: '2026-09-11',
+    title: 'Smarter parallel uploads + your choice',
+    changes: [
+      'Big files no longer share bandwidth with each other — one large video at a time, finishing as fast as possible',
+      'Small files still fill the spare bandwidth alongside a big upload',
+      'New Upload mode setting in Transfers: Smart or strictly One at a time',
+    ],
+  },
+  {
     version: '2.5.3',
     date: '2026-09-09',
     title: 'No more blank page after an update',

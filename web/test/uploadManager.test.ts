@@ -413,3 +413,78 @@ describe('deduplication and resume-on-repick', () => {
     for (let n = 1; n <= 5; n++) expect(counts.get(n), `part ${n}`).toBe(1);
   });
 });
+
+describe('upload modes', () => {
+  it('smart mode: big files never overlap each other, small files ride along', async () => {
+    const backend = new MockBackend();
+    const origPut = backend.transport.putPart.bind(backend.transport);
+    backend.transport = {
+      putPart: async (url, body, opts) => {
+        await new Promise((r) => setTimeout(r, 15));
+        return origPut(url, body, opts);
+      },
+    };
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+    // Two big (multi-part) files + two small ones, added big-first.
+    await mgr.addFiles(
+      [
+        { file: makeFile(backend.partSize * 4, 'BIG_A.MP4') },
+        { file: makeFile(backend.partSize * 4, 'BIG_B.MP4') },
+        { file: makeFile(backend.partSize, 'small_1.jpg') },
+        { file: makeFile(backend.partSize, 'small_2.jpg') },
+      ],
+      { projectId: 'p1' },
+    );
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 15_000, 'all done');
+
+    // Big files ran strictly sequentially: every BIG_A part arrived before
+    // any BIG_B part.
+    const seq = backend.putsReceived.map((p) => p.uploadId);
+    const lastA = seq.lastIndexOf('srv-1');
+    const firstB = seq.indexOf('srv-2');
+    expect(firstB).toBeGreaterThan(lastA);
+
+    // Small files overlapped with big-file transfer (slot 3 was used).
+    expect(backend.maxConcurrentPuts).toBe(3);
+  });
+
+  it('single mode: strictly one file at a time', async () => {
+    const backend = new MockBackend();
+    const origPut = backend.transport.putPart.bind(backend.transport);
+    backend.transport = {
+      putPart: async (url, body, opts) => {
+        await new Promise((r) => setTimeout(r, 10));
+        return origPut(url, body, opts);
+      },
+    };
+    const { mgr } = makeManager(backend, newDbName());
+    mgr.setUploadMode('single');
+    await mgr.init();
+    await mgr.addFiles(
+      [
+        { file: makeFile(backend.partSize, 'a.jpg') },
+        { file: makeFile(backend.partSize, 'b.jpg') },
+        { file: makeFile(backend.partSize * 3, 'c.mp4') },
+      ],
+      { projectId: 'p1' },
+    );
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 15_000, 'all done');
+
+    // Files never interleaved: puts for each upload id form one contiguous run.
+    const seq = backend.putsReceived.map((p) => p.uploadId);
+    const firstIndex = new Map<string, number>();
+    const lastIndex = new Map<string, number>();
+    seq.forEach((id, i) => {
+      if (!firstIndex.has(id)) firstIndex.set(id, i);
+      lastIndex.set(id, i);
+    });
+    for (const [id, first] of firstIndex) {
+      for (const [otherId, otherFirst] of firstIndex) {
+        if (id === otherId) continue;
+        const disjoint = lastIndex.get(id)! < otherFirst || lastIndex.get(otherId)! < first;
+        expect(disjoint, `${id} vs ${otherId} interleaved`).toBe(true);
+      }
+    }
+  });
+});

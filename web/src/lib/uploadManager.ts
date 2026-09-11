@@ -49,6 +49,15 @@ export interface UploadManagerConfig {
   backoffBaseMs: number;
 }
 
+/**
+ * 'smart': one big (multi-part) file at a time using its parallel parts,
+ * with spare slots filled ONLY by small single-part files — a 2 GB video
+ * never shares bandwidth with another 2 GB video, but a pile of photos
+ * uploads several at once.
+ * 'single': strictly one file at a time, nothing shared across files.
+ */
+export type UploadMode = 'smart' | 'single';
+
 export const DEFAULT_CONFIG: UploadManagerConfig = {
   concurrency: 2,
   totalSlots: 3,
@@ -110,6 +119,7 @@ export class UploadManager {
   private partsDoneCache = new Map<string, Set<number>>();
   private consecutiveNetFailures = 0;
   private consecutiveSuccesses = 0;
+  private mode: UploadMode = 'smart';
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private onlineUnsub: (() => void) | null = null;
@@ -200,6 +210,17 @@ export class UploadManager {
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  getUploadMode(): UploadMode {
+    return this.mode;
+  }
+
+  /** Takes effect for the NEXT file picked from the queue; running transfers finish as-is. */
+  setUploadMode(mode: UploadMode): void {
+    this.mode = mode;
+    this.emit();
+    void this.schedule();
   }
 
   // Structural sharing: a view object is only replaced when its data
@@ -528,8 +549,17 @@ export class UploadManager {
           !this.active.has(u.localId),
       )
       .sort((a, b) => a.createdAt - b.createdAt);
+    const maxFiles = this.mode === 'single' ? 1 : this.config.maxConcurrentFiles;
+    // Only ONE multi-part (big) file transfers at a time: splitting bandwidth
+    // between two 2 GB videos finishes neither early. Spare slots go to
+    // small single-part files only.
+    let multipartActive = [...this.active.keys()].some(
+      (id) => (this.uploadsCache.get(id)?.totalParts ?? 1) > 1,
+    );
     for (const u of candidates) {
-      if (this.active.size >= this.config.maxConcurrentFiles) break;
+      if (this.active.size >= maxFiles) break;
+      if (this.mode === 'smart' && u.totalParts > 1 && multipartActive) continue;
+      if (u.totalParts > 1) multipartActive = true;
       void this.runUpload(u.localId).finally(() => this.schedule());
     }
   }
@@ -539,7 +569,8 @@ export class UploadManager {
   }
 
   private totalSlots(): number {
-    return this.consecutiveNetFailures >= 3 ? 1 : this.config.totalSlots;
+    if (this.consecutiveNetFailures >= 3) return 1;
+    return this.mode === 'single' ? this.config.concurrency : this.config.totalSlots;
   }
 
   /** Acquire one global transfer slot; resolves false if aborted while waiting. */

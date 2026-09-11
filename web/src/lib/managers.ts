@@ -1,11 +1,25 @@
 import { useSyncExternalStore } from 'react';
 import { api } from './api';
 import { db } from './db';
-import { UploadManager, type UploadView } from './uploadManager';
+import { UploadManager, type UploadMode, type UploadView } from './uploadManager';
 import { DownloadManager, type DownloadView } from './downloadManager';
 import { XhrPartTransport } from './transport';
 
 export const uploadManager = new UploadManager(db, api, new XhrPartTransport());
+
+// Restore the persisted upload mode (Transfers → Upload mode).
+try {
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('vv-upload-mode') === 'single') {
+    uploadManager.setUploadMode('single');
+  }
+} catch {}
+
+export function setUploadMode(mode: UploadMode): void {
+  uploadManager.setUploadMode(mode);
+  try {
+    localStorage.setItem('vv-upload-mode', mode);
+  } catch {}
+}
 export const downloadManager = new DownloadManager(db, api);
 
 let initPromise: Promise<void> | null = null;

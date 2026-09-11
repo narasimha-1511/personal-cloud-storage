@@ -1,17 +1,18 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { LazyList } from '../components/LazyList';
-import { downloadManager, ensureManagersInit, uploadManager, useDownloads, useUploads } from '../lib/managers';
+import { downloadManager, ensureManagersInit, setUploadMode, uploadManager, useDownloads, useUploads } from '../lib/managers';
 import { formatBytes, formatEta, formatSpeed, percent } from '../lib/format';
-import type { UploadView } from '../lib/uploadManager';
+import type { UploadMode, UploadView } from '../lib/uploadManager';
 import type { DownloadView } from '../lib/downloadManager';
 import Layout from '../components/Layout';
-import { Button, ConfirmSheet, EmptyState, Notice, ProgressBar, StatusChip } from '../components/ui';
+import { Button, ConfirmSheet, EmptyState, Notice, ProgressBar, Segmented, StatusChip } from '../components/ui';
 import { IconTransfers } from '../components/icons';
 
 export default function TransfersPage() {
   const uploads = useUploads();
   const downloads = useDownloads();
   const [notice, setNotice] = useState<string | null>(null);
+  const [mode, setMode] = useState<UploadMode>(uploadManager.getUploadMode());
   const [cancelling, setCancelling] = useState<UploadView | null>(null);
   const resumeInput = useRef<HTMLInputElement>(null);
   const resumeTarget = useRef<string | null>(null);
@@ -100,6 +101,26 @@ export default function TransfersPage() {
         )}
 
         <section>
+          <div className="mb-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3.5">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Upload mode</p>
+            <Segmented<UploadMode>
+              options={[
+                { value: 'smart', label: 'Smart' },
+                { value: 'single', label: 'One at a time' },
+              ]}
+              value={mode}
+              onChange={(m) => {
+                setMode(m);
+                setUploadMode(m);
+              }}
+            />
+            <p className="mt-2 text-[12px] leading-relaxed text-zinc-600">
+              {mode === 'smart'
+                ? 'One big file at a time (with parallel parts); small files fill the spare bandwidth alongside it.'
+                : 'Strictly one file at a time — all bandwidth to the file at the front of the queue.'}
+            </p>
+          </div>
+
           <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>
           <div className="space-y-2">
             <LazyList
