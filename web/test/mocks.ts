@@ -75,11 +75,15 @@ export class MockBackend {
               u.status !== 'ABORTED' && u.size === f.size && u.key.endsWith(`-${f.filename}`),
           );
           if (dupe) {
+            const inProgress = dupe[1].status === 'IN_PROGRESS';
             return {
               kind: 'duplicate' as const,
               filename: f.filename,
               videoId: `vid-${dupe[0]}`,
-              status: dupe[1].status === 'COMPLETED' ? ('READY' as const) : ('UPLOADING' as const),
+              status: inProgress ? ('UPLOADING' as const) : ('READY' as const),
+              ...(inProgress
+                ? { uploadId: dupe[0], partSize: dupe[1].partSize, totalParts: dupe[1].totalParts }
+                : {}),
             };
           }
           return { kind: 'created' as const, filename: f.filename, ...this.register(f) };

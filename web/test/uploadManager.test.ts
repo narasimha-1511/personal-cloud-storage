@@ -488,3 +488,43 @@ describe('upload modes', () => {
     }
   });
 });
+
+describe('cross-device resume', () => {
+  it('adopts an upload started on another device and sends only missing parts', async () => {
+    const backend = new MockBackend();
+    const dbName1 = newDbName();
+
+    // --- phone: uploads parts 1-2 of 5, then dies ---
+    {
+      backend.failPutsAfter = 2;
+      const { mgr, db } = makeManager(backend, dbName1);
+      await mgr.init();
+      const localId = await mgr.addFile(makeFile(backend.partSize * 5, 'SD_CARD.MP4'), { projectId: 'p1' });
+      await waitFor(() => stateOf(mgr, localId)?.state === 'waiting_network', 5000, 'phone dies');
+      mgr.dispose();
+      db.close();
+    }
+    backend.failPutsAfter = -1;
+    const putsFromPhone = backend.putsReceived.length;
+    expect(putsFromPhone).toBe(2);
+
+    // --- laptop: brand-new device (fresh IndexedDB), picks the same file ---
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+    expect(mgr.snapshot()).toHaveLength(0); // truly no local state
+    const result = await mgr.addFiles(
+      [{ file: makeFile(backend.partSize * 5, 'SD_CARD.MP4') }],
+      { projectId: 'p1' },
+    );
+    expect(result.resumed).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.queued).toBe(0);
+
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 10_000, 'laptop finishes');
+
+    // Parts 1-2 (from the phone) were never uploaded again.
+    const afterAdopt = backend.putsReceived.slice(putsFromPhone).map((p) => p.partNumber);
+    expect(afterAdopt.sort((a, b) => a - b)).toEqual([3, 4, 5]);
+    expect([...backend.uploads.values()][0]!.status).toBe('COMPLETED');
+  });
+});

@@ -287,6 +287,7 @@ export class UploadManager {
     target: { projectId: string; folderId?: string | null },
   ): Promise<{ localIds: string[]; queued: number; resumed: number; skipped: number }> {
     const localIds: string[] = [];
+    const adopted: string[] = []; // localIds adopted from another device
     let queued = 0;
     let resumed = 0;
     let skipped = 0;
@@ -339,6 +340,43 @@ export class UploadManager {
         const result = results[idx];
         const { file, handle } = chunk[idx]!;
         if (!result || result.kind === 'duplicate') {
+          // An UPLOADING duplicate with resume info was started elsewhere
+          // (e.g. the phone) — adopt it here and continue from the parts
+          // already in storage instead of skipping it.
+          if (
+            result &&
+            result.kind === 'duplicate' &&
+            result.status === 'UPLOADING' &&
+            result.uploadId &&
+            result.partSize &&
+            result.totalParts
+          ) {
+            const row: LocalUpload = {
+              localId: `${now.toString(36)}-${(i + idx).toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+              serverUploadId: result.uploadId,
+              videoId: result.videoId,
+              projectId: target.projectId,
+              folderId: target.folderId ?? null,
+              filename: file.name,
+              size: file.size,
+              lastModified: file.lastModified,
+              mimeType: file.type || 'application/octet-stream',
+              partSize: result.partSize,
+              totalParts: result.totalParts,
+              state: 'queued',
+              fileHandle: handle,
+              createdAt: now + i + idx,
+              updatedAt: now,
+            };
+            rows.push(row);
+            this.uploadsCache.set(row.localId, row);
+            this.partsDoneCache.set(row.localId, new Set());
+            this.files.set(row.localId, file);
+            localIds.push(row.localId);
+            adopted.push(row.localId);
+            resumed++;
+            continue;
+          }
           skipped++;
           continue;
         }
@@ -368,6 +406,25 @@ export class UploadManager {
         queued++;
       }
       if (rows.length > 0) await this.db.uploads.bulkPut(rows);
+      this.emit();
+    }
+    if (adopted.length > 0) {
+      // Pull the authoritative part list so only missing parts upload.
+      try {
+        const byServerId = new Map(adopted.map((id) => [this.uploadsCache.get(id)!.serverUploadId, id]));
+        const { statuses } = await this.api.uploadStatusBatch([...byServerId.keys()]);
+        for (const status of statuses) {
+          if ('error' in status) continue;
+          const localId = byServerId.get(status.uploadId);
+          if (!localId) continue;
+          for (const p of status.uploadedParts) {
+            await this.recordPartDone(localId, p.partNumber, p.etag, p.size, false);
+          }
+        }
+      } catch {
+        // Re-uploading a part overwrites the same bytes, so this stays
+        // correct even if the status fetch fails; it just wastes bandwidth.
+      }
       this.emit();
     }
     void this.schedule();

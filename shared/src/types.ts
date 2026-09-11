@@ -131,7 +131,20 @@ export interface CreateUploadBatchRequest {
 /** One entry per requested file, in request order. */
 export type BatchUploadResult =
   | ({ kind: 'created'; filename: string } & CreateUploadResponse)
-  | { kind: 'duplicate'; filename: string; videoId: string; status: VideoStatus };
+  | {
+      kind: 'duplicate';
+      filename: string;
+      videoId: string;
+      status: VideoStatus;
+      /**
+       * Present when the duplicate is still UPLOADING and the requester may
+       * continue it (owner or admin): lets another device adopt the upload
+       * and resume from the parts already in storage.
+       */
+      uploadId?: string;
+      partSize?: number;
+      totalParts?: number;
+    };
 
 export interface CreateUploadBatchResponse {
   results: BatchUploadResult[];

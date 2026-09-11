@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.7.0',
+    date: '2026-09-11',
+    title: 'Continue uploads on another device',
+    changes: [
+      'Started uploading from the phone? Move the SD card to the laptop, pick the same files there — the upload continues from exactly where it left off',
+      'Already-uploaded parts are never sent again, on any device',
+      'Pause the upload on the first device before switching, so they don\u2019t compete',
+    ],
+  },
+  {
     version: '2.6.0',
     date: '2026-09-11',
     title: 'Smarter parallel uploads + your choice',

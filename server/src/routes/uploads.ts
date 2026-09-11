@@ -208,7 +208,7 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
       // selection never creates copies.
       const existing = (
         await db
-          .select({ id: videos.id, status: videos.status })
+          .select({ id: videos.id, status: videos.status, ownerId: videos.ownerId })
           .from(videos)
           .where(
             and(
@@ -223,7 +223,22 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
       )[0];
       if (existing) {
         duplicates++;
-        results.push({ kind: 'duplicate', filename: file.filename, videoId: existing.id, status: existing.status });
+        // An in-progress duplicate can be ADOPTED by another device (started
+        // on the phone, continued from the laptop) — hand back the upload id
+        // so the client resumes from the parts already in storage. Only the
+        // owner or an admin may continue it: sign-part enforces the same.
+        let resume: { uploadId: string; partSize: number; totalParts: number } | undefined;
+        if (existing.status === 'UPLOADING' && (user.role === 'admin' || existing.ownerId === user.id)) {
+          const up = (
+            await db
+              .select()
+              .from(uploads)
+              .where(and(eq(uploads.videoId, existing.id), eq(uploads.status, 'IN_PROGRESS')))
+              .limit(1)
+          )[0];
+          if (up) resume = { uploadId: up.id, partSize: up.partSize, totalParts: up.totalParts };
+        }
+        results.push({ kind: 'duplicate', filename: file.filename, videoId: existing.id, status: existing.status, ...resume });
         continue;
       }
       const result = await registerOne(user.id, body.data.projectId, folderId, target.project.slug, target.folderSlug, file);

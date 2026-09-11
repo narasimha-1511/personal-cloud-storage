@@ -319,3 +319,35 @@ describe('batch deduplication', () => {
     expect(third.results[0]!.kind).toBe('created');
   });
 });
+
+describe('cross-device adoption info', () => {
+  it('duplicate results carry resume info for the owner but not for other members', async () => {
+    const t = await createTestApp();
+    const owner = await t.loginAs('narasimha', 'admin');
+    const other = await t.loginAs('editor', 'user');
+    const projectId = await t.seedProject();
+
+    const { uploadId } = await createUpload(t, owner, { projectId, size: PART * 3 });
+    await uploadPart(t, owner, uploadId, 1, PART);
+
+    // Owner re-picks the file from another device: gets the upload id back.
+    const mine = await t.app.request(
+      '/api/uploads/create-batch',
+      post({ projectId, files: [{ filename: 'VID_2038.MP4', size: PART * 3, mimeType: 'video/mp4' }] }, owner),
+    );
+    const mineBody = (await mine.json()) as { results: { kind: string; uploadId?: string; totalParts?: number }[] };
+    expect(mineBody.results[0]!.kind).toBe('duplicate');
+    expect(mineBody.results[0]!.uploadId).toBe(uploadId);
+    expect(mineBody.results[0]!.totalParts).toBe(3);
+
+    // A different (non-admin) member gets a plain duplicate — they could not
+    // sign parts for it anyway.
+    const theirs = await t.app.request(
+      '/api/uploads/create-batch',
+      post({ projectId, files: [{ filename: 'VID_2038.MP4', size: PART * 3, mimeType: 'video/mp4' }] }, other),
+    );
+    const theirsBody = (await theirs.json()) as { results: { kind: string; uploadId?: string }[] };
+    expect(theirsBody.results[0]!.kind).toBe('duplicate');
+    expect(theirsBody.results[0]!.uploadId).toBeUndefined();
+  });
+});
