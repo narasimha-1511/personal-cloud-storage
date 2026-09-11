@@ -350,4 +350,30 @@ describe('cross-device adoption info', () => {
     expect(theirsBody.results[0]!.kind).toBe('duplicate');
     expect(theirsBody.results[0]!.uploadId).toBeUndefined();
   });
+
+  it('a regular member resumes THEIR OWN upload across devices too', async () => {
+    const t = await createTestApp();
+    const member = await t.loginAs('editor', 'user');
+    const projectId = await t.seedProject();
+
+    // Member starts an upload (their phone) and gets one part in.
+    const { uploadId } = await createUpload(t, member, { projectId, size: PART * 2 });
+    await uploadPart(t, member, uploadId, 1, PART);
+
+    // Same member account on a second device re-picks the same file:
+    // resume info comes back because they OWN the upload — no admin needed.
+    const res = await t.app.request(
+      '/api/uploads/create-batch',
+      post({ projectId, files: [{ filename: 'VID_2038.MP4', size: PART * 2, mimeType: 'video/mp4' }] }, member),
+    );
+    const body = (await res.json()) as { results: { kind: string; uploadId?: string; totalParts?: number }[] };
+    expect(body.results[0]!.kind).toBe('duplicate');
+    expect(body.results[0]!.uploadId).toBe(uploadId);
+    expect(body.results[0]!.totalParts).toBe(2);
+
+    // And they can actually continue: sign the missing part and complete.
+    await uploadPart(t, member, uploadId, 2, PART);
+    const complete = await t.app.request(`/api/uploads/${uploadId}/complete`, post(undefined, member));
+    expect(complete.status).toBe(200);
+  });
 });
