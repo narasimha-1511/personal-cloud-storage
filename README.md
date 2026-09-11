@@ -154,6 +154,25 @@ Checks: `npm run check` = typecheck + lint + tests (84) + build. Individual: `np
 
 Redeploys are safe: state lives in the volume (SQLite) and in R2. Interrupted uploads survive server restarts — resume state is in R2 + the phone's IndexedDB.
 
+## 6b. Turbo uploads from a laptop: the `vvup` CLI
+
+When one internet connection isn't enough, the bundled CLI bonds **every
+network interface on the machine** (Wi-Fi + tethered phones + ethernet) by
+spreading multipart PUTs across all of them — no VPN, no relay, aggregate
+throughput ≈ the sum of the links. Same API, same dedup, same resume.
+
+```sh
+npm run build -w cli                 # once
+node cli/dist/index.js login --url https://your-vault --user admin
+node cli/dist/index.js interfaces    # shows which networks can reach the vault
+node cli/dist/index.js upload ~/sdcard --project "Himachal 2026" --folder Camera
+```
+
+Tether phones over USB (or join their hotspots) before running `upload`; every
+interface that can reach the vault is used automatically (`--ifaces ip1,ip2`
+to pin manually, `--per-iface N` streams per link). Interrupted? Re-run the
+same command — it adopts the in-progress uploads and sends only missing parts.
+
 ## 7. Security checklist
 
 - [x] R2 bucket private; token scoped to the one bucket; credentials only in server env

@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.8.0',
+    date: '2026-09-11',
+    title: 'Bond all your networks: vvup CLI',
+    changes: [
+      'New terminal uploader that combines Wi-Fi + tethered phones + ethernet into one fat pipe',
+      'Parts of a single big file spread across every connection — aggregate speed, no VPN needed',
+      'Same rules as always: resumable, dedup-safe, originals untouched (see README)',
+    ],
+  },
+  {
     version: '2.7.0',
     date: '2026-09-11',
     title: 'Continue uploads on another device',
