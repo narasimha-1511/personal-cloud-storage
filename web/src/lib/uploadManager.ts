@@ -151,7 +151,9 @@ export class UploadManager {
 
     // Reconcile all pending uploads with the server in batched calls — with
     // hundreds of queued files this must not be one request per upload.
-    const pending = all.filter((u) => u.state !== 'done' && u.state !== 'aborted' && u.state !== 'error');
+    // 'error' records are included so a stale failure (e.g. finished by
+    // another device) heals to done/aborted on the next launch.
+    const pending = all.filter((u) => u.state !== 'done' && u.state !== 'aborted');
     const byServerId = new Map(pending.map((u) => [u.serverUploadId, u]));
     const CHUNK = 200;
     for (let i = 0; i < pending.length; i += CHUNK) {
@@ -700,7 +702,7 @@ export class UploadManager {
       if (!done.has(n)) queue.push(n);
     }
 
-    let failure: { kind: 'network' | 'fatal'; message: string } | null = null;
+    let failure: { kind: 'network' | 'fatal' | 'done_elsewhere' | 'aborted_elsewhere'; message: string } | null = null;
 
     const worker = async (): Promise<void> => {
       for (;;) {
@@ -741,8 +743,12 @@ export class UploadManager {
       return;
     }
     if (failure !== null) {
-      const f = failure as { kind: 'network' | 'fatal'; message: string };
-      if (f.kind === 'network') {
+      const f = failure as { kind: 'network' | 'fatal' | 'done_elsewhere' | 'aborted_elsewhere'; message: string };
+      if (f.kind === 'done_elsewhere') {
+        await this.setUpload(localId, { state: 'done', error: undefined });
+      } else if (f.kind === 'aborted_elsewhere') {
+        await this.setUpload(localId, { state: 'aborted', error: undefined });
+      } else if (f.kind === 'network') {
         await this.setUpload(localId, { state: 'waiting_network', error: f.message });
         this.armHeartbeat();
       } else {
@@ -785,7 +791,9 @@ export class UploadManager {
     partNumber: number,
     signal: AbortSignal,
     activeState: ActiveState,
-  ): Promise<{ ok: true } | { ok: false; failure: { kind: 'network' | 'fatal'; message: string } }> {
+  ): Promise<
+    { ok: true } | { ok: false; failure: { kind: 'network' | 'fatal' | 'done_elsewhere' | 'aborted_elsewhere'; message: string } }
+  > {
     const start = (partNumber - 1) * u.partSize;
     const blob = file.slice(start, Math.min(start + u.partSize, u.size));
 
@@ -821,6 +829,16 @@ export class UploadManager {
         activeState.inflight.delete(partNumber);
         if (err instanceof DOMException && err.name === 'AbortError') {
           return { ok: false, failure: { kind: 'network', message: 'aborted' } };
+        }
+        if (err instanceof ApiError && err.status === 409) {
+          // "Upload is COMPLETED/ABORTED": another device finished or
+          // cancelled this upload while we held it. Not a failure — resolve
+          // to the server's truth instead of showing a scary Failed card.
+          try {
+            const st = await this.api.uploadStatus(u.serverUploadId);
+            if (st.status === 'COMPLETED') return { ok: false, failure: { kind: 'done_elsewhere', message: '' } };
+            if (st.status === 'ABORTED') return { ok: false, failure: { kind: 'aborted_elsewhere', message: '' } };
+          } catch {}
         }
         const kind = err instanceof TransferError ? err.kind : 'fatal';
         const message = err instanceof Error ? err.message : String(err);

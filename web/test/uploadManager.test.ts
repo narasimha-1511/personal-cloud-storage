@@ -528,3 +528,47 @@ describe('cross-device resume', () => {
     expect([...backend.uploads.values()][0]!.status).toBe('COMPLETED');
   });
 });
+
+describe('finished-elsewhere healing', () => {
+  it('an upload completed by another device resolves to done, not Failed', async () => {
+    const backend = new MockBackend();
+    backend.failPutsAfter = 1;
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+    const localId = await mgr.addFile(makeFile(backend.partSize * 3), { projectId: 'p1' });
+    await waitFor(() => stateOf(mgr, localId)?.state === 'waiting_network', 5000, 'stalled');
+
+    // The "other device" finishes the upload on the server.
+    backend.failPutsAfter = -1;
+    const srv = [...backend.uploads.keys()][0]!;
+    const u = backend.uploads.get(srv)!;
+    for (let n = 1; n <= 3; n++) if (!u.parts.has(n)) u.parts.set(n, { etag: `"e${n}"`, size: backend.partSize });
+    await backend.api.completeUpload(srv);
+
+    // This device resumes, gets 409 on sign-part, and must land on done.
+    await mgr.resume(localId);
+    await waitFor(() => stateOf(mgr, localId)?.state === 'done', 5000, 'healed to done');
+    expect(stateOf(mgr, localId)?.error).toBeUndefined();
+  });
+
+  it('a record stuck in Failed heals to done on the next launch', async () => {
+    const backend = new MockBackend();
+    const dbName = newDbName();
+    // Session 1: a completed server upload, but the local record says error
+    // (the pre-fix state this bug produced).
+    {
+      const { mgr, db } = makeManager(backend, dbName);
+      await mgr.init();
+      const localId = await mgr.addFile(makeFile(backend.partSize), { projectId: 'p1' });
+      await waitFor(() => stateOf(mgr, localId)?.state === 'done', 5000, 'uploaded');
+      const row = (await db.uploads.toArray())[0]!;
+      await db.uploads.put({ ...row, state: 'error', error: 'Upload is COMPLETED' });
+      mgr.dispose();
+      db.close();
+    }
+    // Session 2: init reconciles error records against the server.
+    const { mgr } = makeManager(backend, dbName);
+    await mgr.init();
+    expect(mgr.snapshot()[0]!.state).toBe('done');
+  });
+});

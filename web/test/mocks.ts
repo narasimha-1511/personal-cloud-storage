@@ -125,7 +125,8 @@ export class MockBackend {
 
     signPart: async (id, partNumber) => {
       this.checkNetwork();
-      this.get(id);
+      const u = this.get(id);
+      if (u.status !== 'IN_PROGRESS') throw new ApiError(409, `Upload is ${u.status === 'COMPLETED' ? 'COMPLETED' : 'ABORTED'}`);
       return { url: `mock://r2/${id}/${partNumber}` };
     },
 

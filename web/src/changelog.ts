@@ -14,6 +14,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.8.1',
+    date: '2026-09-12',
+    title: 'No more “Failed: Upload is COMPLETED”',
+    changes: [
+      'A file finished by your other device now shows Done here, not Failed',
+      'Old stuck “Failed” cards heal themselves on the next app launch',
+    ],
+  },
+  {
     version: '2.8.0',
     date: '2026-09-11',
     title: 'Bond all your networks: vvup CLI',
