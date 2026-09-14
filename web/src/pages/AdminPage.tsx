@@ -5,7 +5,7 @@ import { formatDate } from '../lib/format';
 import { useAuth } from '../auth';
 import Layout from '../components/Layout';
 import { Button, Card, Field, InputSheet, Notice, Segmented, Sheet, SheetAction, Spinner, inputClass } from '../components/ui';
-import { IconKey, IconLock, IconMore, IconUserOff, IconUsers } from '../components/icons';
+import { IconEyeOff, IconKey, IconLock, IconMore, IconUserOff, IconUsers } from '../components/icons';
 
 type UserRow = UserInfo & { active: boolean };
 
@@ -17,6 +17,7 @@ export default function AdminPage() {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>('user');
   const [scoped, setScoped] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
   const [menuFor, setMenuFor] = useState<UserRow | null>(null);
   const [resetting, setResetting] = useState<UserRow | null>(null);
 
@@ -32,11 +33,12 @@ export default function AdminPage() {
     e.preventDefault();
     setNotice(null);
     try {
-      await api.createUser({ username, password, role, scoped: role === 'user' && scoped });
+      await api.createUser({ username, password, role, scoped: role === 'user' && scoped, readOnly: role === 'user' && readOnly });
       setUsername('');
       setPassword('');
       setRole('user');
       setScoped(false);
+      setReadOnly(false);
       load();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not create user');
@@ -87,6 +89,23 @@ export default function AdminPage() {
                 </span>
               </Field>
             )}
+            {role === 'user' && (
+              <Field label="Permissions">
+                <Segmented<'full' | 'view'>
+                  options={[
+                    { value: 'full', label: 'Full member' },
+                    { value: 'view', label: 'View only' },
+                  ]}
+                  value={readOnly ? 'view' : 'full'}
+                  onChange={(v) => setReadOnly(v === 'view')}
+                />
+                <span className="mt-1.5 block text-[12px] text-zinc-600">
+                  {readOnly
+                    ? 'Can browse and play files — no downloads, uploads, links, or changes.'
+                    : 'Can upload, download, and manage their own files.'}
+                </span>
+              </Field>
+            )}
             <Button type="submit" kind="primary" full>
               Create account
             </Button>
@@ -108,7 +127,7 @@ export default function AdminPage() {
                     {u.id === me?.id && <span className="ml-1.5 text-xs font-normal text-zinc-500">(you)</span>}
                   </p>
                   <p className="text-[11px] text-zinc-500">
-                    {u.role === 'admin' ? 'Admin' : u.scoped ? 'Folder-only' : 'Member'} · since {formatDate(u.createdAt)}
+                    {u.role === 'admin' ? 'Admin' : [u.readOnly && 'View-only', u.scoped && 'Folder-only'].filter(Boolean).join(' · ') || 'Member'} · since {formatDate(u.createdAt)}
                     {!u.active && <span className="ml-1.5 font-semibold text-red-400">deactivated</span>}
                   </p>
                 </div>
@@ -135,6 +154,23 @@ export default function AdminPage() {
               setMenuFor(null);
             }}
           />
+          {menuFor?.role === 'user' && (
+            <SheetAction
+              icon={<IconEyeOff size={18} />}
+              label={menuFor.readOnly ? 'Allow downloads & uploads' : 'Make view-only'}
+              sub={menuFor.readOnly ? 'Currently browse & play only' : 'Browse & play only — no downloads or changes'}
+              onClick={async () => {
+                const u = menuFor!;
+                setMenuFor(null);
+                try {
+                  await api.setUserReadOnly(u.id, !u.readOnly);
+                  load();
+                } catch (err) {
+                  setNotice(err instanceof Error ? err.message : 'Operation failed');
+                }
+              }}
+            />
+          )}
           {menuFor?.role === 'user' && (
             <SheetAction
               icon={<IconLock size={18} />}

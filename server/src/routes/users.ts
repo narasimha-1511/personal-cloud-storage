@@ -18,6 +18,7 @@ const createUserSchema = z.object({
   password: z.string().min(8).max(256),
   role: z.enum(['admin', 'user']),
   scoped: z.boolean().optional(),
+  readOnly: z.boolean().optional(),
 });
 
 const resetPasswordSchema = z.object({ password: z.string().min(8).max(256) });
@@ -28,6 +29,7 @@ function toUserInfo(row: typeof users.$inferSelect): UserInfo & { active: boolea
     username: row.username,
     role: row.role,
     scoped: row.scoped,
+    readOnly: row.readOnly,
     createdAt: row.createdAt,
     active: row.active,
   };
@@ -58,8 +60,9 @@ export function userRoutes(db: Db) {
       username: body.data.username,
       passwordHash: await hashPassword(body.data.password),
       role: body.data.role,
-      // Only member accounts can be folder-only.
+      // Only member accounts can be folder-only / view-only.
       scoped: body.data.role === 'user' && body.data.scoped === true,
+      readOnly: body.data.role === 'user' && body.data.readOnly === true,
       active: true,
       createdAt: new Date().toISOString(),
     };
@@ -89,6 +92,18 @@ export function userRoutes(db: Db) {
     if (target.role === 'admin') return c.json({ error: 'Admins cannot be folder-only' }, 400);
     await db.update(users).set({ scoped: body.data.scoped }).where(eq(users.id, id));
     log({ op: 'users.set_scoped', ok: true, userId: c.get('user').id, targetUserId: id, scoped: body.data.scoped });
+    return c.json({ ok: true });
+  });
+
+  app.post('/:id/set-readonly', async (c) => {
+    const body = z.object({ readOnly: z.boolean() }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'Invalid request' }, 400);
+    const id = c.req.param('id');
+    const target = (await db.select().from(users).where(eq(users.id, id)))[0];
+    if (!target) return c.json({ error: 'User not found' }, 404);
+    if (target.role === 'admin') return c.json({ error: 'Admins cannot be view-only' }, 400);
+    await db.update(users).set({ readOnly: body.data.readOnly }).where(eq(users.id, id));
+    log({ op: 'users.set_readonly', ok: true, userId: c.get('user').id, targetUserId: id, readOnly: body.data.readOnly });
     return c.json({ ok: true });
   });
 

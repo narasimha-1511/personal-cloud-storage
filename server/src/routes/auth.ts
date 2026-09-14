@@ -61,6 +61,7 @@ export function authRoutes(db: Db, env: Env, sessionSecret: string) {
       username: row.username,
       role: row.role,
       scoped: row.scoped,
+      readOnly: row.readOnly,
       createdAt: row.createdAt,
     };
     return c.json({ user } satisfies LoginResponse);

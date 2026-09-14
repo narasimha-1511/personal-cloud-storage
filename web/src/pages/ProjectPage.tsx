@@ -54,6 +54,7 @@ export default function ProjectPage() {
   const folderId = search.get('f');
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const isViewer = user?.readOnly === true;
 
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
@@ -359,6 +360,10 @@ export default function ProjectPage() {
   }
 
   async function addFiles(files: FileList | File[]) {
+    if (isViewer) {
+      setNotice('This account is view-only — uploads are disabled.');
+      return;
+    }
     setNotice(null);
     try {
       // One batched request; duplicates are skipped and interrupted uploads
@@ -433,8 +438,8 @@ export default function ProjectPage() {
   }
 
   const isSelectable = useCallback(
-    (v: VideoInfo) => canModify(v) || v.status === 'READY',
-    [canModify],
+    (v: VideoInfo) => !isViewer && (canModify(v) || v.status === 'READY'),
+    [canModify, isViewer],
   );
   const selectedVideos = (videos ?? []).filter((v) => selected.has(v.id));
   const selectableCount = (videos ?? []).filter(isSelectable).length;
@@ -672,12 +677,14 @@ export default function ProjectPage() {
           <section>
             <div className="mb-2.5 flex h-7 items-center justify-between">
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">Folders</h2>
-              <button
-                onClick={() => setCreatingFolder(true)}
-                className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100"
-              >
-                New folder
-              </button>
+              {!isViewer && (
+                <button
+                  onClick={() => setCreatingFolder(true)}
+                  className="text-[12px] font-medium text-zinc-400 transition-colors hover:text-zinc-100"
+                >
+                  New folder
+                </button>
+              )}
             </div>
             {folders.length === 0 ? (
               <p className="rounded-xl border border-dashed border-white/[0.08] px-4 py-3.5 text-[12px] text-zinc-600">
@@ -892,7 +899,7 @@ export default function ProjectPage() {
             </Button>
           </div>
         </div>
-      ) : (
+      ) : isViewer ? null : (
         <button
           onClick={() => setAddSheetOpen(true)}
           className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-30 flex h-12 items-center gap-2 rounded-full bg-blue-600 pl-4 pr-5 text-[14px] font-semibold text-white transition-colors hover:bg-blue-500 active:opacity-90 lg:bottom-8 lg:right-8"
@@ -1003,6 +1010,7 @@ export default function ProjectPage() {
                     setVideoMenu(null);
                   }}
                 />
+                {!isViewer && (
                 <SheetAction
                   icon={<IconDownload size={18} />}
                   label="Download original"
@@ -1019,6 +1027,8 @@ export default function ProjectPage() {
                     }
                   }}
                 />
+                )}
+                {!isViewer && (
                 <SheetAction
                   icon={<IconLink size={18} />}
                   label="Copy view link"
@@ -1035,6 +1045,7 @@ export default function ProjectPage() {
                     }
                   }}
                 />
+                )}
               </>
             )}
             {canModify(videoMenu) && (

@@ -12,6 +12,8 @@ export interface UserInfo {
   role: Role;
   /** Folder-only account: sees only folders explicitly granted to it. */
   scoped: boolean;
+  /** View-only account: can browse and play, never download or change anything. */
+  readOnly: boolean;
   createdAt: string;
 }
 
@@ -84,6 +86,7 @@ export interface CreateUserRequest {
   password: string;
   role: Role;
   scoped?: boolean;
+  readOnly?: boolean;
 }
 
 export interface ResetPasswordRequest {

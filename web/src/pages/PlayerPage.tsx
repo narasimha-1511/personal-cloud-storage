@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { useAuth } from '../auth';
 import type { VideoInfo } from '@videovault/shared';
 import { api } from '../lib/api';
 import { formatBytes, formatDate } from '../lib/format';
@@ -10,6 +11,7 @@ import { IconDownload, IconFile } from '../components/icons';
 
 export default function PlayerPage() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const [video, setVideo] = useState<VideoInfo | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,9 +62,11 @@ export default function PlayerPage() {
         )}
         {video && (
           <div className="flex items-center justify-between gap-3">
+            {/* view-only accounts browse and play; no download control */}
             <p className="text-xs text-zinc-500 tabular-nums">
               {formatBytes(video.size)} · original quality · {formatDate(video.createdAt)}
             </p>
+            {!user?.readOnly && (
             <Button
               onClick={() =>
                 void startVideoDownload(video)
@@ -77,6 +81,7 @@ export default function PlayerPage() {
             >
               <IconDownload size={16} /> Download
             </Button>
+            )}
           </div>
         )}
         {kind === 'video' && (

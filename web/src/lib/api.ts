@@ -83,6 +83,8 @@ export const api = {
     request<{ ok: true }>(`/api/users/${id}/set-active`, post({ active })),
   setUserScoped: (id: string, scoped: boolean) =>
     request<{ ok: true }>(`/api/users/${id}/set-scoped`, post({ scoped })),
+  setUserReadOnly: (id: string, readOnly: boolean) =>
+    request<{ ok: true }>(`/api/users/${id}/set-readonly`, post({ readOnly })),
 
   // projects / folders
   listProjects: () => request<{ projects: ProjectInfo[] }>('/api/projects'),

@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.9.0',
+    date: '2026-09-14',
+    title: 'View-only accounts',
+    changes: [
+      'New permission when creating a member: View only — they can browse and play, nothing else',
+      'No downloads, uploads, shareable links, or edits — enforced by the server, not just hidden buttons',
+      'Combine with folder-only access to show a client exactly one folder, look-but-don\u2019t-take',
+      'Toggle any member between full and view-only from their menu in Users',
+    ],
+  },
+  {
     version: '2.8.1',
     date: '2026-09-12',
     title: 'No more “Failed: Upload is COMPLETED”',

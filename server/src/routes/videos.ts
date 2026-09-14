@@ -35,6 +35,7 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
 
   function canModify(c: { get(k: 'user'): AuthVariables['user'] }, ownerId: string): boolean {
     const user = c.get('user');
+    if (user.readOnly) return false;
     return user.role === 'admin' || user.id === ownerId;
   }
 
@@ -149,6 +150,9 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
   ] as const) {
     app.post(path, async (c) => {
       if (!r2) return c.json({ error: 'Object storage is not configured' }, 503);
+      if (disposition === 'attachment' && c.get('user').readOnly) {
+        return c.json({ error: 'This account is view-only — downloads are disabled' }, 403);
+      }
       const row = await loadVideo(c.req.param('id'));
       if (!row || !(await canSeeVideo(db, c.get('user'), row.video))) {
         return c.json({ error: 'Video not found' }, 404);

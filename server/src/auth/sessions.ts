@@ -14,6 +14,7 @@ export interface SessionUser {
   username: string;
   role: 'admin' | 'user';
   scoped: boolean;
+  readOnly: boolean;
 }
 
 export async function createSession(
@@ -46,6 +47,7 @@ export async function getSessionUser(
       username: users.username,
       role: users.role,
       scoped: users.scoped,
+      readOnly: users.readOnly,
       active: users.active,
     })
     .from(sessions)
@@ -54,7 +56,7 @@ export async function getSessionUser(
     .limit(1);
   const row = rows[0];
   if (!row || !row.active) return null;
-  return { id: row.id, username: row.username, role: row.role, scoped: row.scoped };
+  return { id: row.id, username: row.username, role: row.role, scoped: row.scoped, readOnly: row.readOnly };
 }
 
 export async function deleteSession(db: Db, secret: string, token: string): Promise<void> {

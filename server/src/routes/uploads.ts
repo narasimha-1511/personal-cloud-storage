@@ -70,6 +70,9 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
   const app = new Hono<{ Variables: AuthVariables }>();
 
   app.use('*', async (c, next) => {
+    if (c.get('user').readOnly) {
+      return c.json({ error: 'This account is view-only' }, 403);
+    }
     if (!r2) {
       return c.json(
         { error: 'Object storage is not configured on the server (R2_* environment variables).' },

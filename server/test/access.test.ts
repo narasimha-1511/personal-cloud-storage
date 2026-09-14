@@ -223,3 +223,56 @@ describe('folder-only (scoped) accounts', () => {
     expect((await listVisible(t, member, projectId)).length).toBe(4);
   });
 });
+
+describe('view-only accounts', () => {
+  it('can browse and play but cannot download, upload, or modify', async () => {
+    const t = await createTestApp();
+    const admin = await t.loginAs('narasimha', 'admin');
+    const projectId = await t.seedProject();
+    const videoId = await readyVideo(t, admin, projectId, 'clip.mp4');
+
+    // Create the view-only account through the API.
+    const created = await t.app.request(
+      '/api/users',
+      post({ username: 'client', password: 'client-pass-123', role: 'user', readOnly: true }, admin),
+    );
+    expect(created.status).toBe(201);
+    const login = await t.app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'client', password: 'client-pass-123' }),
+    });
+    const viewer = (login.headers.get('set-cookie') ?? '').split(';')[0]!;
+    const me = (await (await t.app.request('/api/auth/me', { headers: { cookie: viewer } })).json()) as {
+      user: { readOnly: boolean };
+    };
+    expect(me.user.readOnly).toBe(true);
+
+    // CAN: list and play.
+    expect((await listVisible(t, viewer, projectId)).map((v) => v.id)).toContain(videoId);
+    expect((await t.app.request(`/api/videos/${videoId}/view-url`, post(undefined, viewer))).status).toBe(200);
+    const thumbs = await t.app.request('/api/videos/view-urls', post({ ids: [videoId] }, viewer));
+    expect(thumbs.status).toBe(200);
+
+    // CANNOT: download, upload, create folders, modify.
+    expect((await t.app.request(`/api/videos/${videoId}/download-url`, post(undefined, viewer))).status).toBe(403);
+    expect(
+      (await t.app.request('/api/uploads/create', post({ filename: 'x.mp4', size: 1000, mimeType: 'video/mp4', projectId }, viewer))).status,
+    ).toBe(403);
+    expect((await t.app.request(`/api/projects/${projectId}/folders`, post({ name: 'Nope' }, viewer))).status).toBe(403);
+    expect((await t.app.request(`/api/videos/${videoId}/rename`, post({ name: 'hax' }, viewer))).status).toBe(403);
+    expect((await t.app.request(`/api/videos/${videoId}/delete`, post(undefined, viewer))).status).toBe(403);
+
+    // Toggling back restores downloads.
+    const users = (await (await t.app.request('/api/users', { headers: { cookie: admin } })).json()) as {
+      users: { id: string; username: string }[];
+    };
+    const clientId = users.users.find((u) => u.username === 'client')!.id;
+    await t.app.request(`/api/users/${clientId}/set-readonly`, post({ readOnly: false }, admin));
+    expect((await t.app.request(`/api/videos/${videoId}/download-url`, post(undefined, viewer))).status).toBe(200);
+
+    // Admins cannot be made view-only.
+    const adminId = users.users.find((u) => u.username === 'narasimha')!.id;
+    expect((await t.app.request(`/api/users/${adminId}/set-readonly`, post({ readOnly: true }, admin))).status).toBe(400);
+  });
+});

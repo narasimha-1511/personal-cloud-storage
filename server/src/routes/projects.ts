@@ -207,6 +207,7 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
   });
 
   app.post('/:id/folders', async (c) => {
+    if (c.get('user').readOnly) return c.json({ error: 'This account is view-only' }, 403);
     const body = nameSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'Name is required' }, 400);
     const projectId = c.req.param('id');
