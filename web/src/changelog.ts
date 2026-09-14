@@ -14,6 +14,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.10.0',
+    date: '2026-09-14',
+    title: 'Skip .LRF proxy files',
+    changes: [
+      'DJI .LRF/.THM preview files are no longer uploaded by default — they are derived copies, ~10% wasted bandwidth',
+      'The toast tells you how many were skipped',
+      'Want them anyway? Transfers → “Upload camera proxy files” toggle (or --include-proxies in vvup)',
+    ],
+  },
+  {
     version: '2.9.0',
     date: '2026-09-14',
     title: 'View-only accounts',

@@ -20,7 +20,7 @@ import readline from 'node:readline';
 import { request } from 'undici';
 import { login, makeApi, type Session } from './api.js';
 import { agentFor, listInterfaces, probe } from './net.js';
-import { uploadAll, type LocalFile, type PartPutter } from './uploader.js';
+import { isProxyFile, uploadAll, type LocalFile, type PartPutter } from './uploader.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'videovault');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'cli.json');
@@ -175,7 +175,16 @@ async function cmdUpload(args: string[]): Promise<void> {
     folderId = folder.id;
   }
 
-  const files = await collectFiles(paths);
+  let files = await collectFiles(paths);
+  // DJI cameras write .LRF/.THM proxies next to every recording — derived
+  // data, skipped by default to save bandwidth.
+  if (!args.includes('--include-proxies')) {
+    const proxies = files.filter((f) => isProxyFile(f.name)).length;
+    if (proxies > 0) {
+      files = files.filter((f) => !isProxyFile(f.name));
+      console.log(`Skipping ${proxies} camera proxy file(s) (.LRF/.THM) — pass --include-proxies to upload them.`);
+    }
+  }
   if (files.length === 0) throw new Error('No files found at the given paths');
   const totalBytes = files.reduce((s, f) => s + f.size, 0);
   console.log(`Uploading ${files.length} file(s), ${fmtBytes(totalBytes)} → ${project.name}${folderName ? ` / ${folderName}` : ''}`);
@@ -241,7 +250,7 @@ const run = async () => {
 Commands:
   vvup login --url <https://vault> --user <name> [--password <pw>]
   vvup interfaces                              probe which networks can reach the vault
-  vvup upload <files/dirs…> --project <name> [--folder <name>] [--ifaces ip1,ip2] [--per-iface 2]
+  vvup upload <files/dirs…> --project <name> [--folder <name>] [--ifaces ip1,ip2] [--per-iface 2] [--include-proxies]
 
 Parts are spread across every reachable network interface (Wi-Fi + tethered
 phones + ethernet), adding their bandwidth together. Re-running after any

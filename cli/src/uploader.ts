@@ -8,6 +8,11 @@ import type { CliApi } from './api.js';
  * ListParts which parts are still missing.
  */
 
+/** Camera sidecar/proxy files that are derived from the real recording. */
+export function isProxyFile(name: string): boolean {
+  return /\.(lrf|thm)$/i.test(name);
+}
+
 export interface LocalFile {
   path: string;
   name: string;

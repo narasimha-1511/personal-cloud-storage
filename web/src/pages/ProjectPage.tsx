@@ -365,11 +365,22 @@ export default function ProjectPage() {
       return;
     }
     setNotice(null);
+    let list = Array.from(files);
+    let proxiesSkipped = 0;
+    if (localStorage.getItem('vv-upload-proxies') !== 'true') {
+      const kept = list.filter((f) => !/\.(lrf|thm)$/i.test(f.name));
+      proxiesSkipped = list.length - kept.length;
+      list = kept;
+    }
+    if (list.length === 0) {
+      showToast(proxiesSkipped > 0 ? `Only camera proxy files (.LRF) selected — skipped ${proxiesSkipped}` : 'Nothing to upload');
+      return;
+    }
     try {
       // One batched request; duplicates are skipped and interrupted uploads
       // matching a picked file resume instead of re-registering.
       const result = await uploadManager.addFiles(
-        Array.from(files).map((file) => ({ file })),
+        list.map((file) => ({ file })),
         { projectId, folderId },
       );
       for (const localId of result.localIds) {
@@ -379,6 +390,7 @@ export default function ProjectPage() {
       if (result.queued > 0) parts.push(`${result.queued} queued`);
       if (result.resumed > 0) parts.push(`${result.resumed} resumed`);
       if (result.skipped > 0) parts.push(`${result.skipped} already uploaded — skipped`);
+      if (proxiesSkipped > 0) parts.push(`${proxiesSkipped} .LRF proxy file${proxiesSkipped === 1 ? '' : 's'} skipped`);
       showToast(parts.length > 0 ? parts.join(' · ') : 'Nothing to upload');
       refresh();
     } catch (err) {

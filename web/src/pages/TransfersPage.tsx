@@ -13,6 +13,13 @@ export default function TransfersPage() {
   const downloads = useDownloads();
   const [notice, setNotice] = useState<string | null>(null);
   const [mode, setMode] = useState<UploadMode>(uploadManager.getUploadMode());
+  const [uploadProxies, setUploadProxies] = useState(() => {
+    try {
+      return localStorage.getItem('vv-upload-proxies') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [cancelling, setCancelling] = useState<UploadView | null>(null);
   const resumeInput = useRef<HTMLInputElement>(null);
   const resumeTarget = useRef<string | null>(null);
@@ -119,6 +126,32 @@ export default function TransfersPage() {
                 ? 'One big file at a time (with parallel parts); small files fill the spare bandwidth alongside it.'
                 : 'Strictly one file at a time — all bandwidth to the file at the front of the queue.'}
             </p>
+            <div className="mt-3 border-t border-white/[0.06] pt-3">
+              <button
+                onClick={() => {
+                  const next = !uploadProxies;
+                  setUploadProxies(next);
+                  try {
+                    localStorage.setItem('vv-upload-proxies', String(next));
+                  } catch {}
+                }}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
+                <span>
+                  <span className="block text-[13px] font-medium text-zinc-200">Upload camera proxy files (.LRF)</span>
+                  <span className="mt-0.5 block text-[12px] text-zinc-600">
+                    DJI writes a small preview copy next to every clip — derived data, off saves ~10% bandwidth.
+                  </span>
+                </span>
+                <span
+                  className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${uploadProxies ? 'bg-blue-600' : 'bg-white/10'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${uploadProxies ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
+                  />
+                </span>
+              </button>
+            </div>
           </div>
 
           <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>

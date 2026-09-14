@@ -149,3 +149,15 @@ describe('bonded uploader', () => {
     expect(retry.failed).toEqual([]);
   });
 });
+
+describe('proxy file detection', () => {
+  it('flags DJI sidecar files and nothing else', async () => {
+    const { isProxyFile } = await import('../src/uploader.js');
+    expect(isProxyFile('DJI_20260909191538_0214_D.LRF')).toBe(true);
+    expect(isProxyFile('clip.lrf')).toBe(true);
+    expect(isProxyFile('DJI_0001.THM')).toBe(true);
+    expect(isProxyFile('DJI_20260909191538_0214_D.MP4')).toBe(false);
+    expect(isProxyFile('photo.DNG')).toBe(false);
+    expect(isProxyFile('lrf-notes.txt')).toBe(false);
+  });
+});
