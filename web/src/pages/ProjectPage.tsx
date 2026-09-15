@@ -5,7 +5,8 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import type { FolderInfo, ProjectInfo, UserInfo, VideoInfo } from '@videovault/shared';
 import { api } from '../lib/api';
 import { invalidateSiblings, pageKey, readPage, thumbsUsable, writePage } from '../lib/pageCache';
-import { ensureManagersInit, uploadManager, useUploads } from '../lib/managers';
+import { ensureManagersInit, uploadManager, useUploads, zipManager } from '../lib/managers';
+import { pickZipSink, supportsSavePicker, zipFilename } from '../lib/zipManager';
 import { startVideoDownload } from '../lib/startDownload';
 import { filesFromDataTransfer } from '../lib/dropFiles';
 import { formatBytes, formatDate, formatEta, formatSpeed, percent } from '../lib/format';
@@ -24,6 +25,7 @@ import {
   StatusChip,
 } from '../components/ui';
 import {
+  IconArchive,
   IconCheck,
   IconDownload,
   IconEyeOff,
@@ -48,6 +50,10 @@ import {
 // instead of rendering a card each (a 600-file selection would be 600 cards).
 const INLINE_STATES = ['uploading', 'completing', 'waiting_network', 'paused', 'needs_file'];
 
+// Chrome and Edge can drop a batch of separate files into one chosen folder;
+// elsewhere each file goes through the browser's own download manager.
+const CAN_PICK_DIRECTORY = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+
 export default function ProjectPage() {
   const { projectId = '' } = useParams();
   const [search, setSearch] = useSearchParams();
@@ -71,6 +77,7 @@ export default function ProjectPage() {
   const [deletingFolder, setDeletingFolder] = useState<FolderInfo | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [accessFolder, setAccessFolder] = useState<FolderInfo | null>(null);
+  const [downloadSheetOpen, setDownloadSheetOpen] = useState(false);
 
   // multi-select
   const [selectMode, setSelectMode] = useState(false);
@@ -431,6 +438,47 @@ export default function ProjectPage() {
     }
   }
 
+  /**
+   * Packs the selection into a single archive. One save prompt instead of one
+   * per file, which is the whole point when a shoot is 400 photos.
+   *
+   * Called straight from the click handler: the save picker needs transient
+   * user activation, so nothing may be awaited before `pickZipSink`.
+   */
+  async function downloadSelectedZip() {
+    const ready = selectedVideos.filter((v) => v.status === 'READY');
+    if (ready.length === 0) {
+      setNotice('None of the selected files are ready to download yet.');
+      return;
+    }
+    if (zipManager.busy) {
+      setNotice('A ZIP is already being built — wait for that one to finish, or cancel it in Transfers.');
+      return;
+    }
+    const filename = zipFilename(currentFolder?.name ?? project?.name ?? 'files');
+    try {
+      const sink = await pickZipSink(
+        filename,
+        ready.reduce((n, v) => n + v.size, 0),
+      );
+      zipManager.start(
+        ready.map((v) => ({
+          id: v.id,
+          displayName: v.displayName,
+          size: v.size,
+          lastModified: Date.parse(v.createdAt),
+        })),
+        sink,
+        filename,
+      );
+      showToast(`Building ${filename} — track it in Transfers`);
+      exitSelect();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      setNotice(err instanceof Error ? err.message : 'Could not start the ZIP');
+    }
+  }
+
   // Stable handlers so memoized rows only re-render when their own data changes.
   const onRowToggle = useCallback((v: VideoInfo) => {
     setSelected((prev) => {
@@ -456,7 +504,9 @@ export default function ProjectPage() {
   const selectedVideos = (videos ?? []).filter((v) => selected.has(v.id));
   const selectableCount = (videos ?? []).filter(isSelectable).length;
   const allModifiable = selectedVideos.length > 0 && selectedVideos.every(canModify);
-  const readySelected = selectedVideos.filter((v) => v.status === 'READY').length;
+  const readyVideos = selectedVideos.filter((v) => v.status === 'READY');
+  const readySelected = readyVideos.length;
+  const readySelectedBytes = readyVideos.reduce((n, v) => n + v.size, 0);
 
   const q = query.trim().toLowerCase();
   // Memoized because these arrays are handed to the windowed list and the
@@ -900,7 +950,7 @@ export default function ProjectPage() {
       {selectMode ? (
         <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-30 border-t border-white/[0.06] bg-[#0e0e11]/95 backdrop-blur lg:bottom-0 lg:left-60">
           <div className="mx-auto flex max-w-lg gap-2 px-4 py-3 lg:max-w-2xl">
-            <Button full kind="primary" disabled={readySelected === 0} onClick={() => void downloadSelected()}>
+            <Button full kind="primary" disabled={readySelected === 0} onClick={() => setDownloadSheetOpen(true)}>
               <IconDownload size={16} /> Download{readySelected > 0 ? ` (${readySelected})` : ''}
             </Button>
             <Button full disabled={!allModifiable} onClick={() => setMoving(selectedVideos)}>
@@ -1003,6 +1053,43 @@ export default function ProjectPage() {
           <span className="rounded-lg border border-white/10 bg-[#18181b] px-4 py-2.5 text-[12px] font-medium text-zinc-200">{toast}</span>
         </div>
       )}
+
+      {/* --- how to download the selection --- */}
+      <Sheet
+        open={downloadSheetOpen}
+        onClose={() => setDownloadSheetOpen(false)}
+        title={`Download ${readySelected} file${readySelected === 1 ? '' : 's'}`}
+      >
+        <p className="mb-3 px-1 text-[12px] text-zinc-600 tabular-nums">{formatBytes(readySelectedBytes)} in total</p>
+        <div className="space-y-0.5">
+          <SheetAction
+            icon={<IconArchive size={18} />}
+            label="One ZIP file"
+            sub={
+              supportsSavePicker()
+                ? 'Asks once where to save, then unzip locally. Keep this tab open — a ZIP cannot resume after a reload.'
+                : 'Built in this tab and handed to your browser as a single file.'
+            }
+            onClick={() => {
+              setDownloadSheetOpen(false);
+              void downloadSelectedZip();
+            }}
+          />
+          <SheetAction
+            icon={<IconDownload size={18} />}
+            label={CAN_PICK_DIRECTORY ? 'Separate files into a folder' : 'Separate files'}
+            sub={
+              CAN_PICK_DIRECTORY
+                ? 'Each one resumable and tracked in Transfers — survives a reload or a dead connection.'
+                : 'Your browser saves each file on its own, and may ask about each one.'
+            }
+            onClick={() => {
+              setDownloadSheetOpen(false);
+              void downloadSelected();
+            }}
+          />
+        </div>
+      </Sheet>
 
       {/* --- single video action sheet --- */}
       <Sheet open={videoMenu !== null} onClose={() => setVideoMenu(null)} title={videoMenu?.displayName}>

@@ -12,3 +12,5 @@ data/
 .DS_Store
 coverage/
 dev-dist/
+# Vite writes these next to the config while resolving it.
+vite.config.ts.timestamp-*

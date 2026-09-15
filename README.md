@@ -28,6 +28,7 @@ Private, resumable raw-video transfer: record 4K on a phone in the mountains, up
 - **Video bytes flow browser ↔ R2 directly.** The app server signs URLs and tracks metadata; it never proxies gigabytes. R2 egress is free, so editor downloads don't touch your Coolify server's bandwidth either.
 - **Uploads**: R2 multipart via presigned `UploadPart` URLs, 50 MB parts (configurable), max 2 parts in flight (drops to 1 on a flaky connection). Every finished part is persisted to IndexedDB *and* reported to the server before anything else happens. On resume the server asks R2 `ListParts` — the authoritative record — and only missing parts are sent. `Complete` verifies every part and the exact total size before a video is marked `READY`, then double-checks the final object with a `HEAD`.
 - **Downloads**: presigned GET + `Range` requests, streamed to disk via the File System Access API (never `response.blob()`), checkpointed every 64 MB. Resume continues from the actual on-disk file size.
+- **ZIP downloads**: a selection can come down as one archive instead of one file per save prompt. The ZIP is generated in the browser (stored entries, no deflate — video and JPEG do not compress) and streamed to disk as the bytes arrive, so the server still never sees a byte and nothing is buffered in memory. A cut connection re-requests the current entry with `Range` from the byte the archive reached, so an interrupted file is not restarted. The one thing an archive cannot do is resume across a reload, and the UI says so.
 - **Viewing**: presigned inline GET (1 h) — the `<video>` tag streams and seeks directly against R2.
 
 Repo layout: `server/` (Hono API, Drizzle + SQLite), `web/` (React PWA), `shared/` (API types).
@@ -196,7 +197,8 @@ same command — it adopts the in-progress uploads and sends only missing parts.
 | Complete called with parts missing | Server refuses (409 + missing list) after checking R2; client drops those parts locally and re-uploads them. A video can never be `READY` without every byte verified. |
 | Completed object size mismatch | Server marks the video `FAILED`, never `READY`. |
 | Download cut at 4.7 GB | Progress is committed to disk in 64 MB checkpoints; resume issues `Range: bytes=<on-disk-size>-`. If a server ever ignored Range, the client errors instead of silently rewriting the file. |
-| Browser without File System Access API | Falls back to the browser's own download manager with an honest caveat. |
+| Browser without File System Access API | Falls back to the browser's own download manager with an honest caveat. A ZIP is built in memory instead of streamed, so it is refused above 1 GB rather than crashing the tab. |
+| ZIP interrupted mid-archive | The current entry resumes with `Range` from the byte the archive reached, and the retry budget resets whenever bytes move, so a flaky line does not end the job. A reload does end it: the partial archive is discarded rather than left looking like a finished download. |
 | Upload abandoned forever | Server sweep aborts multipart uploads idle >7 days so R2 doesn't silently bill for invisible parts. |
 | App server dies mid-upload | Parts continue PUTting to R2 until sign/part-done calls fail, then normal retry/pause kicks in; nothing is lost. |
 
@@ -226,9 +228,12 @@ Browser reality, stated honestly: JavaScript cannot keep uploading after the OS 
 
 1. Open `https://your-domain` in **Chrome or Edge** (needed for resumable managed downloads), log in, go to **Editor**.
 2. Click **Download** on a clip, choose where to save it. Progress shows bytes, %, speed and ETA.
-3. Connection drop? The card says *Connection lost — resuming from X GB*; it retries automatically, or press **Resume** — it continues from the byte where it stopped, even after a browser restart (progress is on disk).
-4. **Play** (Browse tab) streams the original for a quick check without downloading; **Copy view link** gives a 1-hour shareable link.
-5. The downloaded file is bit-exact: the system verifies part inventory and total size at upload completion, and the download finishes only when the on-disk size matches exactly.
+3. Many files at once: **Select** them, hit **Download**, then pick how.
+   - **One ZIP file** — one save prompt for the lot, then unzip locally. Best for a few hundred photos. Keep the tab open: an archive is written in a single pass and cannot pick up where it left off after a reload (a dropped connection *is* handled — it resumes mid-file).
+   - **Separate files into a folder** — one prompt for the destination, then each file downloads on its own, resumable and tracked in Transfers even across a browser restart. Best for raw video.
+4. Connection drop? The card says *Connection lost — resuming from X GB*; it retries automatically, or press **Resume** — it continues from the byte where it stopped, even after a browser restart (progress is on disk).
+5. **Play** (Browse tab) streams the original for a quick check without downloading; **Copy view link** gives a 1-hour shareable link.
+6. The downloaded file is bit-exact: the system verifies part inventory and total size at upload completion, and the download finishes only when the on-disk size matches exactly.
 
 ---
 

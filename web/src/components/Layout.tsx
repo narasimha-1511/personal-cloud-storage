@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
-import { uploadManager, useDownloads, useUploads } from '../lib/managers';
+import { uploadManager, useDownloads, useUploads, useZipJob } from '../lib/managers';
 import { syncWakeLock } from '../lib/wakeLock';
 import { checkForUpdates } from '../lib/swUpdate';
 import { Sheet, SheetAction } from './ui';
@@ -31,14 +31,20 @@ export default function Layout({ children, title, back }: { children: ReactNode;
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'none' | 'unsupported'>('idle');
   const uploads = useUploads();
   const downloads = useDownloads();
+  const zip = useZipJob();
+  const zipping = zip?.state === 'zipping';
   const activeCount =
     uploads.filter((u) => ACTIVE_UPLOAD_STATES.includes(u.state)).length +
-    downloads.filter((d) => ACTIVE_DOWNLOAD_STATES.includes(d.state)).length;
+    downloads.filter((d) => ACTIVE_DOWNLOAD_STATES.includes(d.state)).length +
+    (zipping ? 1 : 0);
 
   // ---- transfer protections ----
+  // A ZIP counts for more here than the others: it cannot be resumed, so a
+  // reload does not cost progress, it costs the whole archive.
   const transferring =
     uploads.some((u) => u.state === 'uploading' || u.state === 'completing' || u.state === 'queued') ||
-    downloads.some((d) => d.state === 'downloading');
+    downloads.some((d) => d.state === 'downloading') ||
+    zipping;
 
   // Keep the screen awake while bytes are moving.
   useEffect(() => {
@@ -323,10 +329,12 @@ function Tab({ to, label, icon, badge, end }: { to: string; label: string; icon:
 function TransferPill({ onOpen }: { onOpen: () => void }) {
   const uploads = useUploads();
   const downloads = useDownloads();
+  const zip = useZipJob();
 
   const upActive = uploads.filter((u) => ACTIVE_UPLOAD_STATES.includes(u.state));
   const downActive = downloads.filter((d) => ACTIVE_DOWNLOAD_STATES.includes(d.state));
-  if (upActive.length === 0 && downActive.length === 0) return null;
+  const zipping = zip?.state === 'zipping' ? zip : null;
+  if (upActive.length === 0 && downActive.length === 0 && !zipping) return null;
 
   const upDone = upActive.reduce((s, u) => s + u.bytesUploaded, 0);
   const upTotal = upActive.reduce((s, u) => s + u.size, 0);
@@ -348,6 +356,16 @@ function TransferPill({ onOpen }: { onOpen: () => void }) {
       label: `↓ ${downActive.length} file${downActive.length === 1 ? '' : 's'}`,
       pct: percent(downDone, downTotal),
       detail: downSpeed > 0 ? formatSpeed(downSpeed) : `${formatBytes(downTotal - downDone)} left`,
+    });
+  }
+  if (zipping) {
+    rows.push({
+      label: `⇩ ZIP ${zipping.filesDone}/${zipping.totalFiles}`,
+      pct: percent(zipping.bytesDone, zipping.totalBytes),
+      detail:
+        zipping.speedBps > 0
+          ? formatSpeed(zipping.speedBps)
+          : `${formatBytes(zipping.totalBytes - zipping.bytesDone)} left`,
     });
   }
 

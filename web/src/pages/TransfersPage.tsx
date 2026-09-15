@@ -1,9 +1,19 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { LazyList } from '../components/LazyList';
-import { downloadManager, ensureManagersInit, setUploadMode, uploadManager, useDownloads, useUploads } from '../lib/managers';
+import {
+  downloadManager,
+  ensureManagersInit,
+  setUploadMode,
+  uploadManager,
+  useDownloads,
+  useUploads,
+  useZipJob,
+  zipManager,
+} from '../lib/managers';
 import { formatBytes, formatEta, formatSpeed, percent } from '../lib/format';
 import type { UploadMode, UploadView } from '../lib/uploadManager';
 import type { DownloadView } from '../lib/downloadManager';
+import type { ZipJobView } from '../lib/zipManager';
 import Layout from '../components/Layout';
 import { Button, ConfirmSheet, EmptyState, Notice, ProgressBar, Segmented, StatusChip } from '../components/ui';
 import { IconTransfers } from '../components/icons';
@@ -11,6 +21,7 @@ import { IconTransfers } from '../components/icons';
 export default function TransfersPage() {
   const uploads = useUploads();
   const downloads = useDownloads();
+  const zip = useZipJob();
   const [notice, setNotice] = useState<string | null>(null);
   const [mode, setMode] = useState<UploadMode>(uploadManager.getUploadMode());
   const [uploadProxies, setUploadProxies] = useState(() => {
@@ -168,6 +179,13 @@ export default function TransfersPage() {
           )}
         </section>
 
+        {zip && (
+          <section>
+            <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">ZIP</h2>
+            <ZipCard z={zip} />
+          </section>
+        )}
+
         {downloads.length > 0 && (
           <section>
             <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Downloads</h2>
@@ -305,6 +323,50 @@ const UploadCard = memo(function UploadCard({
     </div>
   );
 });
+
+function ZipCard({ z }: { z: ZipJobView }) {
+  const pct = percent(z.bytesDone, z.totalBytes);
+  const zipping = z.state === 'zipping';
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.04] p-4">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-sm font-semibold">{z.filename}</p>
+        <StatusChip state={zipping ? 'zipping' : z.state === 'cancelled' ? 'aborted' : z.state} />
+      </div>
+      <ProgressBar value={pct} tone={z.state === 'done' ? 'emerald' : z.error && zipping ? 'amber' : 'blue'} />
+      <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+        <span className="tabular-nums">
+          {z.filesDone} / {z.totalFiles} files · {formatBytes(z.bytesDone)} / {formatBytes(z.totalBytes)} · {pct}%
+        </span>
+        {zipping && z.speedBps > 0 && (
+          <span className="tabular-nums">
+            {formatSpeed(z.speedBps)} · {formatEta(z.etaSeconds)} left
+          </span>
+        )}
+      </div>
+      {zipping && z.currentName && <p className="mt-2 truncate text-[11px] text-zinc-600">Adding {z.currentName}</p>}
+      {zipping && z.error && <p className="mt-2 text-xs text-amber-300/90">{z.error}</p>}
+      {zipping && (
+        <p className="mt-2 text-xs text-zinc-500">
+          Keep this tab open — an archive is written in one pass and cannot pick up where it left off.
+        </p>
+      )}
+      {z.state === 'cancelled' && <p className="mt-2 text-xs text-zinc-500">Stopped — the partial archive was discarded.</p>}
+      {z.state === 'error' && z.error && <p className="mt-2 text-xs text-red-400">{z.error}</p>}
+      <div className="mt-3 flex gap-2">
+        {zipping ? (
+          <Button kind="ghost" onClick={() => zipManager.cancel()}>
+            Cancel
+          </Button>
+        ) : (
+          <Button kind="ghost" onClick={() => zipManager.clear()}>
+            Clear
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const DownloadCard = memo(function DownloadCard({ d, onNotice }: { d: DownloadView; onNotice: (s: string | null) => void }) {
   const pct = percent(d.bytesWritten, d.totalSize);

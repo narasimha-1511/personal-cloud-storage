@@ -3,6 +3,7 @@ import { api } from './api';
 import { db } from './db';
 import { UploadManager, type UploadMode, type UploadView } from './uploadManager';
 import { DownloadManager, type DownloadView } from './downloadManager';
+import { ZipManager, type ZipJobView } from './zipManager';
 import { XhrPartTransport } from './transport';
 
 export const uploadManager = new UploadManager(db, api, new XhrPartTransport());
@@ -21,6 +22,9 @@ export function setUploadMode(mode: UploadMode): void {
   } catch {}
 }
 export const downloadManager = new DownloadManager(db, api);
+// A ZIP cannot be resumed across a reload, so unlike the other two this one
+// keeps no persistent state and has nothing to restore on init.
+export const zipManager = new ZipManager(api);
 
 let initPromise: Promise<void> | null = null;
 export function ensureManagersInit(): Promise<void> {
@@ -77,6 +81,15 @@ export function useUploads(): UploadView[] {
   return useSyncExternalStore(uploadStore.subscribe, uploadStore.getSnapshot);
 }
 
+const zipStore = createStore<ZipJobView | null>(
+  (cb) => zipManager.onChange(cb),
+  () => zipManager.snapshot(),
+);
+
 export function useDownloads(): DownloadView[] {
   return useSyncExternalStore(downloadStore.subscribe, downloadStore.getSnapshot);
+}
+
+export function useZipJob(): ZipJobView | null {
+  return useSyncExternalStore(zipStore.subscribe, zipStore.getSnapshot);
 }

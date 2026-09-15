@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.11.0',
+    date: '2026-09-15',
+    title: 'Download a selection as one ZIP',
+    changes: [
+      'Select files and choose Download, and you can now take the whole selection as a single ZIP — one save prompt instead of one per photo, then unzip it locally',
+      'The archive is written straight to disk as it downloads, so a selection far larger than your memory is fine, and a dropped connection picks the current file back up at the exact byte instead of starting it again',
+      'The ZIP shows its progress in the transfer pill and on Transfers, where you can cancel it',
+      'Downloading as separate files is still there as the other option: slower to kick off, but each file resumes on its own and survives a reload',
+    ],
+  },
+  {
     version: '2.10.0',
     date: '2026-09-14',
     title: 'Skip .LRF proxy files',

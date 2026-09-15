@@ -83,6 +83,7 @@ const CHIP: Record<string, { cls: string; label: string; busy?: boolean }> = {
   waiting_network: { cls: 'text-amber-400', label: 'Waiting for network', busy: true },
   needs_file: { cls: 'text-amber-400', label: 'Tap to resume' },
   completing: { cls: 'text-blue-400', label: 'Finishing', busy: true },
+  zipping: { cls: 'text-blue-400', label: 'Zipping', busy: true },
   done: { cls: 'text-emerald-400', label: 'Done' },
   error: { cls: 'text-red-400', label: 'Failed' },
   aborted: { cls: 'text-zinc-500', label: 'Cancelled' },

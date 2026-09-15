@@ -47,6 +47,15 @@ export const IconDownload = (p: P) => (
   </Svg>
 );
 
+/** A box with a latch — the usual shorthand for an archive. */
+export const IconArchive = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="4.5" rx="1" />
+    <path d="M5 8.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8.5" />
+    <path d="M10.5 12.5h3" />
+  </Svg>
+);
+
 export const IconLink = (p: P) => (
   <Svg {...p}>
     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
