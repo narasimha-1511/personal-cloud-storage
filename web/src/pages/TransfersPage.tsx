@@ -15,10 +15,13 @@ import type { UploadMode, UploadView } from '../lib/uploadManager';
 import type { DownloadView } from '../lib/downloadManager';
 import type { ZipJobView } from '../lib/zipManager';
 import Layout from '../components/Layout';
+import { useAuth } from '../auth';
 import { Button, ConfirmSheet, EmptyState, Notice, ProgressBar, Segmented, StatusChip } from '../components/ui';
 import { IconTransfers } from '../components/icons';
 
 export default function TransfersPage() {
+  const { user } = useAuth();
+  const isViewer = user?.readOnly === true;
   const uploads = useUploads();
   const downloads = useDownloads();
   const zip = useZipJob();
@@ -168,7 +171,30 @@ export default function TransfersPage() {
             </div>
           </div>
 
-          <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>
+            {!isViewer && (
+              <button
+                onClick={() =>
+                  void uploadManager
+                    .adoptPending()
+                    .then((r) =>
+                      setNotice(
+                        r.added > 0
+                          ? `Found ${r.added} unfinished upload${r.added === 1 ? '' : 's'} from your other devices — use the banner above to re-select the files (a whole folder works) and they continue here.`
+                          : r.found > 0
+                            ? 'All unfinished uploads are already on this device.'
+                            : 'No unfinished uploads anywhere — everything is done.',
+                      ),
+                    )
+                    .catch((err) => setNotice(err instanceof Error ? err.message : 'Sync failed'))
+                }
+                className="text-[12px] font-semibold text-blue-400 transition-colors hover:text-blue-300"
+              >
+                Sync from other devices
+              </button>
+            )}
+          </div>
           <div className="space-y-2">
             <LazyList
               items={sortedActive}

@@ -377,3 +377,32 @@ describe('cross-device adoption info', () => {
     expect(complete.status).toBe(200);
   });
 });
+
+describe('pending uploads (cross-device sync)', () => {
+  it('lists my unfinished uploads with real part counts, scoped per user', async () => {
+    const t = await createTestApp();
+    const me = await t.loginAs('shooter');
+    const other = await t.loginAs('someone-else');
+    const projectId = await t.seedProject();
+
+    const a = await createUpload(t, me, { projectId, filename: 'A.MP4' });
+    await createUpload(t, other, { projectId, filename: 'THEIRS.MP4' });
+    await uploadPart(t, me, a.uploadId, 1, PART);
+
+    const res = await t.app.request('/api/uploads/pending', { headers: { cookie: me } });
+    expect(res.status).toBe(200);
+    const { uploads: pending } = (await res.json()) as {
+      uploads: { uploadId: string; filename: string; partsDone: number; totalParts: number; projectId: string }[];
+    };
+    // Only my own unfinished upload, with the parts I actually finished.
+    expect(pending.map((p) => p.filename)).toEqual(['A.MP4']);
+    expect(pending[0]).toMatchObject({ uploadId: a.uploadId, partsDone: 1, totalParts: 3, projectId });
+
+    // Completed uploads drop off the list.
+    await uploadPart(t, me, a.uploadId, 2, PART);
+    await uploadPart(t, me, a.uploadId, 3, 1000);
+    expect((await t.app.request(`/api/uploads/${a.uploadId}/complete`, post(undefined, me))).status).toBe(200);
+    const after = await t.app.request('/api/uploads/pending', { headers: { cookie: me } });
+    expect(((await after.json()) as { uploads: unknown[] }).uploads).toEqual([]);
+  });
+});

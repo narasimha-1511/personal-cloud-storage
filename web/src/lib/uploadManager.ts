@@ -1,6 +1,7 @@
 import type {
   CreateUploadBatchRequest,
   CreateUploadBatchResponse,
+  PendingUploadsResponse,
   CreateUploadResponse,
   UploadStatusBatchResponse,
   UploadStatusResponse,
@@ -20,6 +21,7 @@ export interface UploadApi {
     folderId?: string | null;
   }): Promise<CreateUploadResponse>;
   createUploadBatch(body: CreateUploadBatchRequest): Promise<CreateUploadBatchResponse>;
+  pendingUploads(): Promise<PendingUploadsResponse>;
   uploadStatus(id: string): Promise<UploadStatusResponse>;
   uploadStatusBatch(uploadIds: string[]): Promise<UploadStatusBatchResponse>;
   signPart(id: string, partNumber: number): Promise<{ url: string }>;
@@ -305,7 +307,7 @@ export class UploadManager {
           u.folderId === (target.folderId ?? null) &&
           u.filename === file.name &&
           u.size === file.size &&
-          u.lastModified === file.lastModified,
+          (u.lastModified === 0 || u.lastModified === file.lastModified),
       );
       if (match) {
         try {
@@ -437,7 +439,9 @@ export class UploadManager {
   async provideFile(localId: string, file: File): Promise<void> {
     const u = this.uploadsCache.get(localId);
     if (!u) throw new Error('Unknown upload');
-    if (file.name !== u.filename || file.size !== u.size || file.lastModified !== u.lastModified) {
+    // lastModified 0 = record synced from another device, which can't know
+    // the local file's mtime; name+size is the identity there.
+    if (file.name !== u.filename || file.size !== u.size || (u.lastModified !== 0 && file.lastModified !== u.lastModified)) {
       throw new Error(
         `This is not the same file. Expected "${u.filename}" (${u.size} bytes). Pick the exact original file so already-uploaded parts stay valid.`,
       );
@@ -445,6 +449,62 @@ export class UploadManager {
     this.files.set(localId, file);
     await this.setUpload(localId, { state: 'queued', error: undefined });
     void this.schedule();
+  }
+
+  /**
+   * Cross-device sync: pulls every unfinished upload the server knows about
+   * and materialises the ones this device isn't tracking as `needs_file` —
+   * re-selecting the files (or the whole SD-card folder) then continues them
+   * here, into their original project/folder, from the exact parts done.
+   */
+  async adoptPending(): Promise<{ found: number; added: number }> {
+    const { uploads } = await this.api.pendingUploads();
+    const known = new Set([...this.uploadsCache.values()].map((u) => u.serverUploadId));
+    const now = Date.now();
+    const rows: LocalUpload[] = [];
+    for (const [i, p] of uploads.entries()) {
+      if (known.has(p.uploadId)) continue;
+      const row: LocalUpload = {
+        localId: `${now.toString(36)}-sync-${i.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        serverUploadId: p.uploadId,
+        videoId: p.videoId,
+        projectId: p.projectId,
+        folderId: p.folderId,
+        filename: p.filename,
+        size: p.size,
+        lastModified: 0, // unknown here — provideFile matches by name+size
+        mimeType: p.mimeType,
+        partSize: p.partSize,
+        totalParts: p.totalParts,
+        state: 'needs_file',
+        createdAt: now + i,
+        updatedAt: now,
+      };
+      rows.push(row);
+      this.uploadsCache.set(row.localId, row);
+      this.partsDoneCache.set(row.localId, new Set());
+    }
+    if (rows.length > 0) {
+      await this.db.uploads.bulkPut(rows);
+      // Authoritative part list so progress shows and, once the file is
+      // re-selected, only missing parts are uploaded.
+      try {
+        const byServerId = new Map(rows.map((r) => [r.serverUploadId, r.localId]));
+        const { statuses } = await this.api.uploadStatusBatch([...byServerId.keys()]);
+        for (const status of statuses) {
+          if ('error' in status) continue;
+          const localId = byServerId.get(status.uploadId);
+          if (!localId) continue;
+          for (const part of status.uploadedParts) {
+            await this.recordPartDone(localId, part.partNumber, part.etag, part.size, false);
+          }
+        }
+      } catch {
+        // Parts are re-verified against ListParts on resume anyway.
+      }
+      this.emit();
+    }
+    return { found: uploads.length, added: rows.length };
   }
 
   async pause(localId: string): Promise<void> {

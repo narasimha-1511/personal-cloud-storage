@@ -91,6 +91,28 @@ export class MockBackend {
       };
     },
 
+    pendingUploads: async () => {
+      this.apiCalls++;
+      this.checkNetwork();
+      return {
+        uploads: [...this.uploads.entries()]
+          .filter(([, u]) => u.status === 'IN_PROGRESS')
+          .map(([id, u]) => ({
+            uploadId: id,
+            videoId: `vid-${id}`,
+            projectId: 'p1',
+            folderId: null,
+            filename: u.key.slice(u.key.indexOf(`${id}-`) + id.length + 1),
+            size: u.size,
+            mimeType: 'video/mp4',
+            partSize: u.partSize,
+            totalParts: u.totalParts,
+            partsDone: u.parts.size,
+            updatedAt: new Date().toISOString(),
+          })),
+      };
+    },
+
     uploadStatusBatch: async (uploadIds) => {
       this.apiCalls++;
       this.checkNetwork();

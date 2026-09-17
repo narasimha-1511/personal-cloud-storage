@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.14.0',
+    date: '2026-09-17',
+    title: 'Move an upload queue between devices',
+    changes: [
+      'New \u201cSync from other devices\u201d on Transfers: pulls every unfinished upload from the server \u2014 started on your phone, continued on the laptop with the SD card',
+      'The \u201cwaiting for files\u201d banner now has \u201cRe-select from a folder\u201d: point it at the whole SD card and it finds the right files by name and size',
+      'Each upload continues into its original destination folder automatically \u2014 no need to remember which file was going where across five folders',
+      'Files that match nothing are simply ignored, so selecting the entire card is safe',
+    ],
+  },
+  {
     version: '2.13.0',
     date: '2026-09-17',
     title: 'See what you haven\u2019t downloaded yet',

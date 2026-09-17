@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import type {
@@ -7,6 +7,7 @@ import type {
   CompleteUploadResponse,
   CreateUploadBatchResponse,
   CreateUploadResponse,
+  PendingUploadsResponse,
   SignPartResponse,
   UploadStatusBatchResponse,
   UploadStatusResponse,
@@ -304,6 +305,44 @@ export function uploadRoutes({ db, env, r2 }: UploadRouteDeps) {
       uploadedParts,
     };
   }
+
+  /**
+   * Every unfinished upload of yours the server knows about, regardless of
+   * which device started it — the client turns unknown ones into
+   * "waiting for file" entries so the whole queue can move to a new device.
+   */
+  app.get('/pending', async (c) => {
+    const user = c.get('user');
+    const conditions = [eq(uploads.status, 'IN_PROGRESS'), eq(videos.status, 'UPLOADING')];
+    if (user.role !== 'admin') conditions.push(eq(videos.ownerId, user.id));
+    const rows = await db
+      .select({
+        upload: uploads,
+        video: videos,
+        // Literal qualified name — interpolating the drizzle column into raw
+        // sql renders an unqualified "id" inside the correlated subquery.
+        partsDone: sql<number>`(SELECT COUNT(*) FROM upload_parts up WHERE up.upload_id = uploads.id AND up.status = 'UPLOADED')`,
+      })
+      .from(uploads)
+      .innerJoin(videos, eq(uploads.videoId, videos.id))
+      .where(and(...conditions))
+      .orderBy(desc(uploads.createdAt));
+    return c.json({
+      uploads: rows.map((r) => ({
+        uploadId: r.upload.id,
+        videoId: r.video.id,
+        projectId: r.video.projectId,
+        folderId: r.video.folderId,
+        filename: r.video.originalFilename,
+        size: r.video.size,
+        mimeType: r.video.mimeType,
+        partSize: r.upload.partSize,
+        totalParts: r.upload.totalParts,
+        partsDone: r.partsDone,
+        updatedAt: r.upload.updatedAt,
+      })),
+    } satisfies PendingUploadsResponse);
+  });
 
   app.get('/:id/status', async (c) => {
     const found = await loadOwned(c.get('user'), c.req.param('id'));

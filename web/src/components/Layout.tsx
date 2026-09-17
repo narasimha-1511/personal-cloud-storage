@@ -66,35 +66,43 @@ export default function Layout({ children, title, back }: { children: ReactNode;
   // ---- bulk file re-attach after a reload ----
   const needsFile = uploads.filter((u) => u.state === 'needs_file');
   const resumeInput = useRef<HTMLInputElement>(null);
+  const resumeDirInput = useRef<HTMLInputElement>(null);
   const [resumeMsg, setResumeMsg] = useState<string | null>(null);
 
+  /**
+   * Matches picked files to waiting uploads by exact name + size and resumes
+   * each one — every upload already knows its own project/folder, so the user
+   * never has to remember where anything was going. Built to take a whole
+   * SD card folder: files that match nothing are simply ignored.
+   */
   async function onResumeAllPick(files: FileList) {
-    const pending = [...needsFile];
-    const used = new Set<string>();
+    const byKey = new Map<string, typeof needsFile>();
+    for (const u of needsFile) {
+      const key = `${u.filename}:${u.size}`;
+      const bucket = byKey.get(key) ?? [];
+      bucket.push(u);
+      byKey.set(key, bucket);
+    }
     let ok = 0;
-    let miss = 0;
     for (const file of Array.from(files)) {
-      const target = pending.find(
-        (u) => !used.has(u.localId) && u.filename === file.name && u.size === file.size,
-      );
-      if (!target) {
-        miss++;
-        continue;
-      }
+      const target = byKey.get(`${file.name}:${file.size}`)?.shift();
+      if (!target) continue;
       try {
         await uploadManager.provideFile(target.localId, file);
-        used.add(target.localId);
         ok++;
       } catch {
-        miss++;
+        // stays in needs_file; the banner keeps counting it
       }
     }
+    const remaining = needsFile.length - ok;
     setResumeMsg(
-      ok > 0
-        ? `${ok} upload${ok === 1 ? '' : 's'} resumed${miss > 0 ? ` — ${miss} file${miss === 1 ? '' : 's'} didn't match` : ''}`
-        : 'None of the picked files matched — select the exact original files.',
+      ok === 0
+        ? 'No matching files in that selection — the app matches by exact name and size.'
+        : remaining === 0
+          ? `All ${ok} upload${ok === 1 ? '' : 's'} resumed — each to its original folder.`
+          : `${ok} resumed — ${remaining} still waiting (their files weren't in that selection).`,
     );
-    setTimeout(() => setResumeMsg(null), 5000);
+    setTimeout(() => setResumeMsg(null), 8000);
   }
 
   async function runUpdateCheck() {
@@ -201,15 +209,24 @@ export default function Layout({ children, title, back }: { children: ReactNode;
                 {needsFile.length === 1 ? 'its file' : 'their files'}
               </p>
               <p className="mt-1 text-[12px] leading-relaxed text-amber-200/70">
-                The page was reloaded, so the app needs the files again. Select them all in one go — nothing
-                already uploaded is sent twice.
+                The page was reloaded, so the app needs the files again. Point it at the whole SD card folder —
+                it finds the right files and sends each one to its original destination. Nothing already uploaded
+                is sent twice, and extra files are ignored.
               </p>
-              <button
-                onClick={() => resumeInput.current?.click()}
-                className="mt-3 h-9 rounded-lg bg-amber-500 px-4 text-[13px] font-semibold text-black transition-colors hover:bg-amber-400"
-              >
-                Re-select {needsFile.length === 1 ? 'the file' : `all ${needsFile.length} files`}
-              </button>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => resumeDirInput.current?.click()}
+                  className="h-9 rounded-lg bg-amber-500 px-4 text-[13px] font-semibold text-black transition-colors hover:bg-amber-400"
+                >
+                  Re-select from a folder
+                </button>
+                <button
+                  onClick={() => resumeInput.current?.click()}
+                  className="h-9 rounded-lg border border-amber-500/40 px-4 text-[13px] font-semibold text-amber-200 transition-colors hover:bg-amber-500/10"
+                >
+                  Pick files
+                </button>
+              </div>
               {resumeMsg && <p className="mt-2 text-[12px] text-amber-200">{resumeMsg}</p>}
             </div>
           )}
@@ -218,6 +235,16 @@ export default function Layout({ children, title, back }: { children: ReactNode;
             type="file"
             multiple
             hidden
+            onChange={(e) => {
+              if (e.target.files?.length) void onResumeAllPick(e.target.files);
+              e.target.value = '';
+            }}
+          />
+          <input
+            ref={resumeDirInput}
+            type="file"
+            hidden
+            {...({ webkitdirectory: '' } as Record<string, string>)}
             onChange={(e) => {
               if (e.target.files?.length) void onResumeAllPick(e.target.files);
               e.target.value = '';

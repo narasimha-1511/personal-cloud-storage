@@ -3,6 +3,7 @@ import type {
   CreateFolderRequest,
   CreateUploadBatchRequest,
   CreateUploadBatchResponse,
+  PendingUploadsResponse,
   UploadStatusBatchResponse,
   CreateProjectRequest,
   CreateUploadRequest,
@@ -111,6 +112,7 @@ export const api = {
   createUploadBatch: (body: CreateUploadBatchRequest) =>
     request<CreateUploadBatchResponse>('/api/uploads/create-batch', post(body)),
   uploadStatus: (id: string) => request<UploadStatusResponse>(`/api/uploads/${id}/status`),
+  pendingUploads: () => request<PendingUploadsResponse>('/api/uploads/pending'),
   uploadStatusBatch: (uploadIds: string[]) =>
     request<UploadStatusBatchResponse>('/api/uploads/status-batch', post({ uploadIds })),
   signPart: (id: string, partNumber: number) =>

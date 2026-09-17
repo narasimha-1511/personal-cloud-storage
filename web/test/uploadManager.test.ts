@@ -601,3 +601,50 @@ describe('finished-elsewhere healing', () => {
     expect(mgr.snapshot()[0]!.state).toBe('done');
   });
 });
+
+describe('cross-device queue sync', () => {
+  it('adoptPending pulls the other device\'s queue; a folder re-pick finishes only missing parts', async () => {
+    const backend = new MockBackend();
+
+    // Device A (the phone): registers two files, uploads a few parts, dies.
+    const a = makeManager(backend, newDbName());
+    await a.mgr.init();
+    backend.failPutsAfter = 3;
+    await a.mgr.addFiles(
+      [{ file: makeFile(backend.partSize * 5, 'PHONE_A.MP4') }, { file: makeFile(backend.partSize * 4, 'PHONE_B.MP4') }],
+      { projectId: 'p1' },
+    );
+    await waitFor(
+      () => a.mgr.snapshot().every((v) => v.state === 'waiting_network' || v.state === 'paused'),
+      10_000,
+      'phone dead',
+    );
+    a.mgr.dispose();
+    backend.failPutsAfter = -1;
+
+    // Device B (the laptop): knows nothing locally, syncs from the server.
+    const b = makeManager(backend, newDbName());
+    await b.mgr.init();
+    const result = await b.mgr.adoptPending();
+    expect(result.added).toBe(2);
+    const views = b.mgr.snapshot();
+    expect(views.every((v) => v.state === 'needs_file')).toBe(true);
+    // Progress from the phone is already visible before any file is picked.
+    expect(views.reduce((s, v) => s + v.partsDone, 0)).toBe(3);
+    // Syncing again is idempotent.
+    expect((await b.mgr.adoptPending()).added).toBe(0);
+
+    // Re-pick (different lastModified — an SD card copy): name+size matches.
+    const putsBefore = backend.putsReceived.length;
+    for (const v of views) {
+      const local = [...(await b.mgr['db'].uploads.toArray())].find((u) => u.filename === v.filename)!;
+      await b.mgr.provideFile(local.localId, makeFile(v.size, v.filename, 999));
+    }
+    await waitFor(() => b.mgr.snapshot().every((v) => v.state === 'done'), 15_000, 'all done on laptop');
+
+    // Only the missing parts crossed the wire: 9 total, 3 done on the phone.
+    expect(backend.putsReceived.length - putsBefore).toBe(6);
+    const partNums = backend.putsReceived.slice(putsBefore).map((p) => `${p.uploadId}:${p.partNumber}`);
+    expect(new Set(partNums).size).toBe(6);
+  });
+});

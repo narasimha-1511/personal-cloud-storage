@@ -60,6 +60,25 @@ export interface VideoInfo {
   updatedAt: string;
 }
 
+/** An unfinished upload the server knows about — for cross-device sync. */
+export interface PendingUploadInfo {
+  uploadId: string;
+  videoId: string;
+  projectId: string;
+  folderId: string | null;
+  filename: string;
+  size: number;
+  mimeType: string;
+  partSize: number;
+  totalParts: number;
+  partsDone: number;
+  updatedAt: string;
+}
+
+export interface PendingUploadsResponse {
+  uploads: PendingUploadInfo[];
+}
+
 export interface SetHiddenRequest {
   hidden: boolean;
 }
