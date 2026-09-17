@@ -4,6 +4,7 @@ import type {
   FolderInfo,
   ProjectInfo,
   UploadStatusResponse,
+  VideoInfo,
 } from '@videovault/shared';
 
 export interface Session {
@@ -36,6 +37,7 @@ async function json<T>(session: Session, path: string, body?: unknown): Promise<
 export interface CliApi {
   listProjects(): Promise<ProjectInfo[]>;
   listFolders(projectId: string): Promise<FolderInfo[]>;
+  listVideos(): Promise<VideoInfo[]>;
   createBatch(
     projectId: string,
     folderId: string | null,
@@ -52,6 +54,7 @@ export function makeApi(session: Session): CliApi {
     listProjects: async () => (await json<{ projects: ProjectInfo[] }>(session, '/api/projects')).projects,
     listFolders: async (projectId) =>
       (await json<{ folders: FolderInfo[] }>(session, `/api/projects/${projectId}/folders`)).folders,
+    listVideos: async () => (await json<{ videos: VideoInfo[] }>(session, '/api/videos')).videos,
     createBatch: (projectId, folderId, files) =>
       json(session, '/api/uploads/create-batch', { projectId, folderId, files }),
     status: (uploadId) => json(session, `/api/uploads/${uploadId}/status`),

@@ -278,6 +278,32 @@ export class DownloadManager {
     this.active.get(videoId)?.controller.abort();
   }
 
+  /** Pauses everything running or queued in one tap. */
+  async pauseAll(): Promise<number> {
+    let n = 0;
+    for (const d of [...this.cache.values()]) {
+      if (d.state === 'downloading') {
+        this.pause(d.videoId);
+        n++;
+      } else if (d.state === 'queued') {
+        await this.patch(d.videoId, { state: 'paused' });
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /** Clears finished downloads from the list (files on disk are untouched). */
+  async removeFinished(): Promise<number> {
+    const done = [...this.cache.values()].filter((d) => d.state === 'done');
+    for (const d of done) {
+      await this.db.downloads.delete(d.videoId);
+      this.cache.delete(d.videoId);
+    }
+    this.emit();
+    return done.length;
+  }
+
   async remove(videoId: string): Promise<void> {
     this.pause(videoId);
     await this.db.downloads.delete(videoId);

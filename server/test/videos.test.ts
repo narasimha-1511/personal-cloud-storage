@@ -204,10 +204,14 @@ describe('counts', () => {
     const p = projects.projects.find((x) => x.id === projectId)!;
     expect(p.videoCount).toBe(4);
     expect(p.folderCount).toBe(1);
+    // Size subquery uses the same literal-qualified-column pattern as counts;
+    // this guards against the drizzle unqualified-"id" regression too.
+    expect(p.sizeBytes).toBe(3 * 1000 + PART);
 
     const folders = (await (await t.app.request(`/api/projects/${projectId}/folders`, { headers: { cookie: admin } })).json()) as {
       folders: FolderInfo[];
     };
     expect(folders.folders[0]!.videoCount).toBe(3);
+    expect(folders.folders[0]!.sizeBytes).toBe(3000);
   });
 });

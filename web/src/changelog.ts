@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.16.0',
+    date: '2026-09-17',
+    title: 'Quality of life, everywhere',
+    changes: [
+      'Projects and folders now show their total size, not just file counts \u2014 you can see where the storage goes',
+      'Downloads got Pause all and Clear finished, matching uploads',
+      'Cancel all uploads in one confirmed tap \u2014 for when 600 files went to the wrong folder',
+      'New CLI command: vvup free \u2014 frees SD-card space by deleting ONLY files verified uploaded in the vault (dry-run by default, --keep pins files)',
+    ],
+  },
+  {
     version: '2.15.0',
     date: '2026-09-17',
     title: 'Pause all / Resume all uploads',

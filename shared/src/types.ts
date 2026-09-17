@@ -24,6 +24,8 @@ export interface ProjectInfo {
   createdAt: string;
   videoCount: number;
   folderCount: number;
+  /** Total bytes of all non-aborted files (original sizes). */
+  sizeBytes?: number;
 }
 
 export interface FolderInfo {
@@ -34,6 +36,8 @@ export interface FolderInfo {
   createdAt: string;
   createdByUsername: string | null;
   videoCount: number;
+  /** Total bytes of all non-aborted files (original sizes). */
+  sizeBytes?: number;
   /** Restricted folders are visible only to admins and granted users. */
   restricted: boolean;
   /** User ids with access to a restricted folder. Present for admins only. */

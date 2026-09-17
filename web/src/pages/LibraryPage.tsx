@@ -3,7 +3,7 @@ import { useUploads } from '../lib/managers';
 import { useNavigate } from 'react-router-dom';
 import type { ProjectInfo } from '@videovault/shared';
 import { api } from '../lib/api';
-import { formatDate } from '../lib/format';
+import { formatBytes, formatDate } from '../lib/format';
 import { useAuth } from '../auth';
 import Layout from '../components/Layout';
 import { Button, ConfirmSheet, EmptyState, InputSheet, Notice, Sheet, SheetAction, Spinner } from '../components/ui';
@@ -54,6 +54,7 @@ export default function LibraryPage() {
                 <span className="block truncate text-[15px] font-semibold">{p.name}</span>
                 <span className="mt-0.5 block text-[12px] text-zinc-500">
                   {p.videoCount} file{p.videoCount === 1 ? '' : 's'}
+                  {(p.sizeBytes ?? 0) > 0 && ` · ${formatBytes(p.sizeBytes!)}`}
                   {p.folderCount > 0 && ` · ${p.folderCount} folder${p.folderCount === 1 ? '' : 's'}`}
                   {' · '}
                   {formatDate(p.createdAt)}

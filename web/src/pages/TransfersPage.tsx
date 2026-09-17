@@ -35,6 +35,7 @@ export default function TransfersPage() {
     }
   });
   const [cancelling, setCancelling] = useState<UploadView | null>(null);
+  const [cancellingAll, setCancellingAll] = useState(false);
   const resumeInput = useRef<HTMLInputElement>(null);
   const resumeTarget = useRef<string | null>(null);
 
@@ -50,6 +51,8 @@ export default function TransfersPage() {
   const resumableDownloads = downloads.filter(
     (d) => d.state === 'paused' || d.state === 'waiting_network' || d.state === 'error',
   ).length;
+  const pausableDownloads = downloads.filter((d) => d.state === 'downloading' || d.state === 'queued').length;
+  const finishedDownloads = downloads.filter((d) => d.state === 'done').length;
   const finishedUploads = uploads.filter((u) => u.state === 'done' || u.state === 'aborted');
 
   // The live transfer always sorts to the top — never buried under the queue.
@@ -196,6 +199,14 @@ export default function TransfersPage() {
                 Resume all ({resumableUploads})
               </button>
             )}
+            {activeUploads.length > 1 && (
+              <button
+                onClick={() => setCancellingAll(true)}
+                className="text-[12px] font-semibold text-zinc-500 transition-colors hover:text-red-400"
+              >
+                Cancel all
+              </button>
+            )}
             {!isViewer && (
               <button
                 onClick={() =>
@@ -243,6 +254,23 @@ export default function TransfersPage() {
           <section>
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Downloads</h2>
+              <div className="flex items-center gap-4">
+              {pausableDownloads > 0 && (
+                <button
+                  onClick={() => void downloadManager.pauseAll()}
+                  className="text-[12px] font-semibold text-zinc-400 transition-colors hover:text-zinc-100"
+                >
+                  Pause all ({pausableDownloads})
+                </button>
+              )}
+              {finishedDownloads > 0 && (
+                <button
+                  onClick={() => void downloadManager.removeFinished()}
+                  className="text-[12px] font-semibold text-zinc-500 transition-colors hover:text-zinc-100"
+                >
+                  Clear finished
+                </button>
+              )}
               {resumableDownloads > 0 && (
                 <button
                   onClick={() =>
@@ -258,6 +286,7 @@ export default function TransfersPage() {
                   Resume all ({resumableDownloads})
                 </button>
               )}
+              </div>
             </div>
             <div className="space-y-2">
               {downloads.map((d) => (
@@ -300,6 +329,18 @@ export default function TransfersPage() {
         onChange={(e) => {
           if (e.target.files?.length) void onResumePick(e.target.files);
           e.target.value = '';
+        }}
+      />
+
+      <ConfirmSheet
+        open={cancellingAll}
+        onClose={() => setCancellingAll(false)}
+        title={`Cancel all ${activeUploads.length} uploads?`}
+        body="Every unfinished upload stops and its already-uploaded parts are discarded — next time they start from zero. Files that already finished are not touched."
+        confirmLabel="Cancel everything"
+        onConfirm={async () => {
+          const n = await uploadManager.abortAll();
+          setNotice(`Cancelled ${n} upload${n === 1 ? '' : 's'}.`);
         }}
       />
 

@@ -781,6 +781,7 @@ export default function ProjectPage() {
                         </span>
                         <span className="block truncate text-[11px] text-zinc-600">
                           {f.videoCount} file{f.videoCount === 1 ? '' : 's'}
+                          {(f.sizeBytes ?? 0) > 0 && ` · ${formatBytes(f.sizeBytes!)}`}
                           {f.createdByUsername ? ` · by ${f.createdByUsername}` : ''}
                         </span>
                       </span>

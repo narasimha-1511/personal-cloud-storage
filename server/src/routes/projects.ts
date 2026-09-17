@@ -70,7 +70,7 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
         const folderIds = byProject.get(p.id)!;
         const count = (
           await db
-            .select({ n: sql<number>`COUNT(*)` })
+            .select({ n: sql<number>`COUNT(*)`, bytes: sql<number>`COALESCE(SUM(videos.size), 0)` })
             .from(videos)
             .where(and(inArray(videos.folderId, folderIds), sql`videos.status != 'ABORTED'`))
         )[0];
@@ -81,6 +81,7 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
           createdAt: p.createdAt,
           videoCount: count?.n ?? 0,
           folderCount: folderIds.length,
+          sizeBytes: count?.bytes ?? 0,
         });
       }
       return c.json({ projects: out });
@@ -95,6 +96,7 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
         project: projects,
         videoCount: sql<number>`(SELECT COUNT(*) FROM videos v WHERE v.project_id = projects.id AND v.status != 'ABORTED')`,
         folderCount: sql<number>`(SELECT COUNT(*) FROM folders f WHERE f.project_id = projects.id)`,
+        sizeBytes: sql<number>`(SELECT COALESCE(SUM(v.size), 0) FROM videos v WHERE v.project_id = projects.id AND v.status != 'ABORTED')`,
       })
       .from(projects)
       .orderBy(projects.createdAt);
@@ -105,6 +107,7 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
       createdAt: r.project.createdAt,
       videoCount: r.videoCount,
       folderCount: r.folderCount,
+      sizeBytes: r.sizeBytes,
     }));
     return c.json({ projects: out });
   });
@@ -167,6 +170,7 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
         createdByUsername: users.username,
         // Literal `folders.id` on purpose — see the note in the project list.
         videoCount: sql<number>`(SELECT COUNT(*) FROM videos v WHERE v.folder_id = folders.id AND v.status != 'ABORTED')`,
+        sizeBytes: sql<number>`(SELECT COALESCE(SUM(v.size), 0) FROM videos v WHERE v.folder_id = folders.id AND v.status != 'ABORTED')`,
       })
       .from(folders)
       .leftJoin(users, eq(folders.createdBy, users.id))
@@ -200,6 +204,7 @@ export function projectRoutes({ db, r2 }: ProjectRouteDeps) {
       createdAt: r.folder.createdAt,
       createdByUsername: r.createdByUsername,
       videoCount: r.videoCount,
+      sizeBytes: r.sizeBytes,
       restricted: r.folder.restricted,
       ...(user.role === 'admin' ? { memberIds: membersByFolder.get(r.folder.id) ?? [] } : {}),
     }));

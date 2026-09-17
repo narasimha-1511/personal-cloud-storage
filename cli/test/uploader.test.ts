@@ -33,6 +33,7 @@ function makeFake(preexisting?: { name: string; size: number; doneParts: number[
   const api: CliApi = {
     listProjects: async () => [],
     listFolders: async () => [],
+    listVideos: async () => [],
     createBatch: async (_p, _f, files) => ({
       results: files.map((f) => {
         const existing = byName.get(`${f.filename}:${f.size}`);

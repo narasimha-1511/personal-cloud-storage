@@ -528,6 +528,18 @@ export class UploadManager {
     return n;
   }
 
+  /** Cancels every unfinished upload — already-uploaded parts are discarded. */
+  async abortAll(): Promise<number> {
+    let n = 0;
+    for (const u of [...this.uploadsCache.values()]) {
+      if (u.state !== 'done' && u.state !== 'aborted') {
+        await this.abort(u.localId);
+        n++;
+      }
+    }
+    return n;
+  }
+
   /** Resumes every paused or errored upload that still has its file. */
   async resumeAll(): Promise<number> {
     let n = 0;

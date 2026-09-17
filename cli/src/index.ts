@@ -13,7 +13,7 @@
  *   vvup upload ./sdcard --project "Himachal 2026" --folder Camera
  */
 import { createReadStream } from 'node:fs';
-import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -21,6 +21,7 @@ import { request } from 'undici';
 import { login, makeApi, type Session } from './api.js';
 import { agentFor, listInterfaces, probe } from './net.js';
 import { isProxyFile, uploadAll, type LocalFile, type PartPutter } from './uploader.js';
+import { planFree, safeSetFrom } from './free.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'videovault');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'cli.json');
@@ -235,6 +236,45 @@ async function cmdUpload(args: string[]): Promise<void> {
   if (summary.failed.length > 0) process.exitCode = 1;
 }
 
+/**
+ * vvup free <dir> [--match substr] [--keep a,b] [--confirm]
+ * Frees SD-card space by deleting ONLY files verified READY in the vault.
+ */
+async function cmdFree(args: string[]): Promise<void> {
+  const dir = args.find((a) => !a.startsWith('--'));
+  if (!dir) throw new Error('Usage: vvup free <dir> [--match <substring>] [--keep name1,name2] [--confirm]');
+  const match = flag(args, '--match');
+  const keep = (flag(args, '--keep') ?? '').split(',');
+  const confirm = args.includes('--confirm');
+
+  const session = await loadSession();
+  const api = makeApi(session);
+  const all = await collectFiles([dir]);
+  const files = all
+    .filter((f) => (match ? f.name.includes(match) : true))
+    .map((f) => ({ path: f.path, name: f.name, size: f.size }));
+  const safe = safeSetFrom(await api.listVideos());
+  const { toDelete, toKeep, freedBytes } = planFree(files, safe, keep);
+
+  console.log(`${files.length} file(s) on the card${match ? ` matching "${match}"` : ''}`);
+  console.log(`\nKEEP (not verified in the vault, or pinned): ${toKeep.length}`);
+  for (const f of toKeep) console.log(`  keep  ${f.name}  (${(f.size / 1e9).toFixed(2)} GB)`);
+  console.log(`\nDELETE (uploaded & verified READY in the vault): ${toDelete.length} — frees ${(freedBytes / 1e9).toFixed(1)} GB`);
+  for (const f of toDelete) console.log(`  del   ${f.name}  (${(f.size / 1e6).toFixed(0)} MB)`);
+
+  if (!confirm) {
+    console.log('\nDry run only — nothing deleted. Re-run with --confirm to delete the files marked "del".');
+    return;
+  }
+  let n = 0;
+  for (const f of toDelete) {
+    await unlink(f.path);
+    n++;
+    process.stdout.write(`\rdeleted ${n}/${toDelete.length}`);
+  }
+  console.log(`\nDone: freed ${(freedBytes / 1e9).toFixed(1)} GB. ${toKeep.length} file(s) kept.`);
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
 const run = async () => {
   switch (cmd) {
@@ -244,6 +284,8 @@ const run = async () => {
       return cmdInterfaces();
     case 'upload':
       return cmdUpload(rest);
+    case 'free':
+      return cmdFree(rest);
     default:
       console.log(`vvup — Video Vault bonded uploader
 
@@ -251,6 +293,9 @@ Commands:
   vvup login --url <https://vault> --user <name> [--password <pw>]
   vvup interfaces                              probe which networks can reach the vault
   vvup upload <files/dirs…> --project <name> [--folder <name>] [--ifaces ip1,ip2] [--per-iface 2] [--include-proxies]
+  vvup free <dir> [--match <substr>] [--keep name1,name2] [--confirm]
+                                               free SD-card space: deletes ONLY files verified
+                                               uploaded (READY) in the vault; dry-run by default
 
 Parts are spread across every reachable network interface (Wi-Fi + tethered
 phones + ethernet), adding their bandwidth together. Re-running after any
