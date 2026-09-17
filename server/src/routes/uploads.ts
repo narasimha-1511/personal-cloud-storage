@@ -47,8 +47,9 @@ export interface UploadRouteDeps {
   r2: R2Client | null;
 }
 
-export function toVideoInfo(v: typeof videos.$inferSelect, ownerUsername: string): VideoInfo {
+export function toVideoInfo(v: typeof videos.$inferSelect, ownerUsername: string, downloadedByMe = false): VideoInfo {
   return {
+    downloadedByMe,
     id: v.id,
     projectId: v.projectId,
     folderId: v.folderId,

@@ -14,6 +14,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.13.0',
+    date: '2026-09-17',
+    title: 'See what you haven\u2019t downloaded yet',
+    changes: [
+      'Files you have not downloaded show a NEW badge \u2014 tracked per account on the server, so it works across your devices',
+      'New \u201cNew for you\u201d filter: filter \u2192 Select all \u2192 Download, and the 30 fresh files out of 100 are three taps',
+      'Downloading by any route clears the badge automatically \u2014 single file, folder batch, or ZIP',
+      'Already have files from before? Select them \u2192 Download \u2192 \u201cJust mark as downloaded\u201d; a file\u2019s menu can also mark it back as new',
+    ],
+  },
+  {
     version: '2.12.0',
     date: '2026-09-17',
     title: 'Resume all downloads, smallest files first',

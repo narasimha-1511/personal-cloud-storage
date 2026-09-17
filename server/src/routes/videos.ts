@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import { and, desc, eq, isNull, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { SignedUrlResponse } from '@videovault/shared';
 import type { Db } from '../db/index.js';
-import { folders, users, videos } from '../db/schema.js';
+import { folders, users, videoDownloads, videos } from '../db/schema.js';
 import type { R2Client } from '../r2.js';
 import type { AuthVariables } from '../auth/middleware.js';
 import type { Thumbnailer } from '../thumbs.js';
@@ -40,12 +40,13 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
   }
 
   app.get('/', async (c) => {
+    const user = c.get('user');
     const projectId = c.req.query('projectId');
     const folderId = c.req.query('folderId');
     const status = c.req.query('status');
 
     const conditions: SQL[] = [];
-    const visibility = visibleVideosCondition(c.get('user'));
+    const visibility = visibleVideosCondition(user);
     if (visibility) conditions.push(visibility);
     if (projectId) conditions.push(eq(videos.projectId, projectId));
     if (folderId === 'none') conditions.push(isNull(videos.folderId));
@@ -55,12 +56,18 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
     }
 
     const rows = await db
-      .select({ video: videos, ownerUsername: users.username })
+      .select({
+        video: videos,
+        ownerUsername: users.username,
+        // Literal qualified column names: interpolating the drizzle column
+        // into raw sql renders an unqualified "id" (see projects.ts counts).
+        downloadedByMe: sql<number>`EXISTS (SELECT 1 FROM video_downloads vd WHERE vd.video_id = videos.id AND vd.user_id = ${user.id})`,
+      })
       .from(videos)
       .innerJoin(users, eq(videos.ownerId, users.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(videos.createdAt));
-    return c.json({ videos: rows.map((r) => toVideoInfo(r.video, r.ownerUsername)) });
+    return c.json({ videos: rows.map((r) => toVideoInfo(r.video, r.ownerUsername, !!r.downloadedByMe)) });
   });
 
   app.get('/:id', async (c) => {
@@ -144,6 +151,38 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
     return c.json({ ok: true });
   });
 
+  /**
+   * Explicitly set/clear the per-user downloaded flag — for files the editor
+   * already has from before this feature existed (or grabbed out of band).
+   */
+  app.post('/mark-downloaded', async (c) => {
+    const user = c.get('user');
+    if (user.readOnly) return c.json({ error: 'This account is view-only' }, 403);
+    const body = z
+      .object({ ids: z.array(z.string().min(1)).min(1).max(500), downloaded: z.boolean() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'Invalid request' }, 400);
+    const now = new Date().toISOString();
+    let updated = 0;
+    for (const id of new Set(body.data.ids)) {
+      const row = await loadVideo(id);
+      if (!row || !(await canSeeVideo(db, user, row.video))) continue;
+      if (body.data.downloaded) {
+        await db
+          .insert(videoDownloads)
+          .values({ videoId: id, userId: user.id, downloadedAt: now })
+          .onConflictDoNothing();
+      } else {
+        await db
+          .delete(videoDownloads)
+          .where(and(eq(videoDownloads.videoId, id), eq(videoDownloads.userId, user.id)));
+      }
+      updated++;
+    }
+    log({ op: 'video.mark_downloaded', ok: true, userId: user.id, count: updated, downloaded: body.data.downloaded });
+    return c.json({ ok: true, updated });
+  });
+
   for (const [path, disposition] of [
     ['/:id/view-url', 'inline'],
     ['/:id/download-url', 'attachment'],
@@ -165,6 +204,15 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
         filename: row.video.displayName,
         disposition,
       });
+      if (disposition === 'attachment') {
+        // Remember who has taken which file — powers the NEW badge. Signing
+        // the URL is the moment the user committed to downloading it.
+        const now = new Date().toISOString();
+        await db
+          .insert(videoDownloads)
+          .values({ videoId: row.video.id, userId: c.get('user').id, downloadedAt: now })
+          .onConflictDoUpdate({ target: [videoDownloads.videoId, videoDownloads.userId], set: { downloadedAt: now } });
+      }
       log({
         op: disposition === 'inline' ? 'video.view_url' : 'video.download_url',
         ok: true,
@@ -224,6 +272,7 @@ export function videoRoutes({ db, env, r2, thumbnailer }: VideoRouteDeps) {
     if (!row) return c.json({ error: 'Video not found' }, 404);
     if (!canModify(c, row.video.ownerId)) return c.json({ error: 'Forbidden' }, 403);
     await deleteVideoStorage(db, r2, row.video);
+    await db.delete(videoDownloads).where(eq(videoDownloads.videoId, row.video.id));
     await db.delete(videos).where(eq(videos.id, row.video.id));
     log({ op: 'video.delete', ok: true, videoId: row.video.id, userId: c.get('user').id });
     return c.json({ ok: true });

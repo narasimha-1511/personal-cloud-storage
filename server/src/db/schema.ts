@@ -131,3 +131,18 @@ export const uploadParts = sqliteTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.uploadId, t.partNumber] }) }),
 );
+
+/** Per-user download tracking: powers the editor's NEW badge and filter. */
+export const videoDownloads = sqliteTable(
+  'video_downloads',
+  {
+    videoId: text('video_id')
+      .notNull()
+      .references(() => videos.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    downloadedAt: text('downloaded_at').notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.videoId, t.userId] }) }),
+);

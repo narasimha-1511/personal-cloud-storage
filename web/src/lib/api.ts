@@ -142,6 +142,8 @@ export const api = {
   moveVideo: (id: string, body: MoveVideoRequest) =>
     request<{ ok: true }>(`/api/videos/${id}/move`, post(body)),
   deleteVideo: (id: string) => request<{ ok: true }>(`/api/videos/${id}/delete`, post()),
+  markDownloaded: (ids: string[], downloaded: boolean) =>
+    request<{ ok: true; updated: number }>('/api/videos/mark-downloaded', post({ ids, downloaded })),
 
   health: () => request<{ ok: true }>('/api/health'),
 };

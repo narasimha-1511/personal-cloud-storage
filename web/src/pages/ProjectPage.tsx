@@ -89,7 +89,7 @@ export default function ProjectPage() {
 
   // filters
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'READY' | 'UPLOADING'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'READY' | 'UPLOADING' | 'new'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'video' | 'image' | 'other'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'largest' | 'name'>('newest');
 
@@ -501,6 +501,13 @@ export default function ProjectPage() {
     (v: VideoInfo) => !isViewer && (canModify(v) || v.status === 'READY'),
     [canModify, isViewer],
   );
+  // "New" = ready, not yet downloaded by me, and not my own upload (the
+  // shooter never downloads their own files — badging them would be noise).
+  const myId = user?.id;
+  const isNewForMe = useCallback(
+    (v: VideoInfo) => v.status === 'READY' && !v.downloadedByMe && v.ownerId !== myId,
+    [myId],
+  );
   const selectedVideos = (videos ?? []).filter((v) => selected.has(v.id));
   const selectableCount = (videos ?? []).filter(isSelectable).length;
   const allModifiable = selectedVideos.length > 0 && selectedVideos.every(canModify);
@@ -521,7 +528,11 @@ export default function ProjectPage() {
           if (typeFilter === 'image') return v.mimeType.startsWith('image/');
           return !v.mimeType.startsWith('video/') && !v.mimeType.startsWith('image/');
         })
-        .filter((v) => (statusFilter === 'all' ? true : v.status === statusFilter))
+        .filter((v) => {
+          if (statusFilter === 'all') return true;
+          if (statusFilter === 'new') return isNewForMe(v);
+          return v.status === statusFilter;
+        })
         .filter((v) => (q ? v.displayName.toLowerCase().includes(q) : true))
         .sort((a, b) => {
           switch (sortBy) {
@@ -535,7 +546,7 @@ export default function ProjectPage() {
               return b.createdAt.localeCompare(a.createdAt);
           }
         }),
-    [videos, typeFilter, statusFilter, q, sortBy],
+    [videos, typeFilter, statusFilter, q, sortBy, isNewForMe],
   );
 
   // What the viewer can step through: everything currently listed that is
@@ -872,6 +883,7 @@ export default function ProjectPage() {
                   onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
                 >
                   <option value="all">All statuses</option>
+                  {!isViewer && <option value="new">New for you</option>}
                   <option value="READY">Ready</option>
                   <option value="UPLOADING">Pending upload</option>
                 </select>
@@ -906,6 +918,7 @@ export default function ProjectPage() {
                     <GridTile
                       v={v}
                       thumb={thumbs[v.id]}
+                      isNew={!isViewer && isNewForMe(v)}
                       selectMode={selectMode}
                       isSelected={selected.has(v.id)}
                       selectable={isSelectable(v)}
@@ -916,6 +929,7 @@ export default function ProjectPage() {
                   ) : (
                     <VideoRow
                       v={v}
+                      isNew={!isViewer && isNewForMe(v)}
                       selectMode={selectMode}
                       isSelected={selected.has(v.id)}
                       selectable={isSelectable(v)}
@@ -1088,6 +1102,23 @@ export default function ProjectPage() {
               void downloadSelected();
             }}
           />
+          <SheetAction
+            icon={<IconCheck size={18} />}
+            label="Just mark as downloaded"
+            sub="No download — clears the NEW badge for files you already have"
+            onClick={async () => {
+              setDownloadSheetOpen(false);
+              const ids = readyVideos.map((v) => v.id);
+              try {
+                await api.markDownloaded(ids, true);
+                setVideos((prev) => prev?.map((v) => (ids.includes(v.id) ? { ...v, downloadedByMe: true } : v)) ?? prev);
+                showToast(`${ids.length} file${ids.length === 1 ? '' : 's'} marked as downloaded`);
+                exitSelect();
+              } catch (err) {
+                setNotice(err instanceof Error ? err.message : 'Could not mark the files');
+              }
+            }}
+          />
         </div>
       </Sheet>
 
@@ -1144,6 +1175,23 @@ export default function ProjectPage() {
                     }
                   }}
                 />
+                )}
+                {!isViewer && videoMenu.ownerId !== user?.id && (
+                  <SheetAction
+                    icon={<IconCheck size={18} />}
+                    label={videoMenu.downloadedByMe ? 'Mark as new' : 'Mark as downloaded'}
+                    sub={videoMenu.downloadedByMe ? 'Shows the NEW badge again' : 'Clears the NEW badge without downloading'}
+                    onClick={async () => {
+                      const v = videoMenu;
+                      setVideoMenu(null);
+                      try {
+                        await api.markDownloaded([v.id], !v.downloadedByMe);
+                        setVideos((prev) => prev?.map((x) => (x.id === v.id ? { ...x, downloadedByMe: !v.downloadedByMe } : x)) ?? prev);
+                      } catch (err) {
+                        setNotice(err instanceof Error ? err.message : 'Could not mark the file');
+                      }
+                    }}
+                  />
                 )}
               </>
             )}
@@ -1345,6 +1393,7 @@ export default function ProjectPage() {
 
 const VideoRow = memo(function VideoRow({
   v,
+  isNew,
   selectMode,
   isSelected,
   selectable,
@@ -1353,6 +1402,7 @@ const VideoRow = memo(function VideoRow({
   onPlay,
 }: {
   v: VideoInfo;
+  isNew: boolean;
   selectMode: boolean;
   isSelected: boolean;
   selectable: boolean;
@@ -1399,6 +1449,11 @@ const VideoRow = memo(function VideoRow({
         <span className="flex items-center justify-between gap-3">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-[14px] font-medium">{v.displayName}</span>
+            {isNew && (
+              <span className="shrink-0 rounded border border-blue-500/40 bg-blue-500/15 px-1 py-px text-[9px] font-semibold tracking-wide text-blue-300">
+                NEW
+              </span>
+            )}
             {v.hidden && <IconEyeOff size={12} className="shrink-0 text-amber-400/80" />}
           </span>
           {!selectMode && <StatusChip state={v.status} />}
@@ -1566,6 +1621,7 @@ function Thumb({ src, fallback }: { src: string; fallback: ReactNode }) {
 const GridTile = memo(function GridTile({
   v,
   thumb,
+  isNew,
   selectMode,
   isSelected,
   selectable,
@@ -1575,6 +1631,7 @@ const GridTile = memo(function GridTile({
 }: {
   v: VideoInfo;
   thumb?: string;
+  isNew: boolean;
   selectMode: boolean;
   isSelected: boolean;
   selectable: boolean;
@@ -1621,6 +1678,9 @@ const GridTile = memo(function GridTile({
         <span className="absolute left-1.5 top-1.5 text-amber-400/90">
           <IconEyeOff size={12} />
         </span>
+      )}
+      {isNew && !v.hidden && !selectMode && (
+        <span className="absolute left-1.5 top-1.5 rounded bg-blue-600/90 px-1.5 py-0.5 text-[9px] font-semibold text-white">NEW</span>
       )}
       {selectMode ? (
         <span

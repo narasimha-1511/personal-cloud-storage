@@ -54,6 +54,8 @@ export interface VideoInfo {
   status: VideoStatus;
   /** Hidden files are visible only to their owner and admins. */
   hidden: boolean;
+  /** Whether the requesting user has downloaded this file (per-user). */
+  downloadedByMe?: boolean;
   createdAt: string;
   updatedAt: string;
 }
