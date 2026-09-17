@@ -449,6 +449,35 @@ describe('upload modes', () => {
     expect(backend.maxConcurrentPuts).toBe(3);
   });
 
+  it('smart mode: the queue drains smallest-first regardless of pick order', async () => {
+    const backend = new MockBackend();
+    const origPut = backend.transport.putPart.bind(backend.transport);
+    backend.transport = {
+      putPart: async (url, body, opts) => {
+        await new Promise((r) => setTimeout(r, 10));
+        return origPut(url, body, opts);
+      },
+    };
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+    // Added biggest-first — smart mode must still send the small stuff first.
+    await mgr.addFiles(
+      [
+        { file: makeFile(backend.partSize * 6, 'HUGE.MP4') },
+        { file: makeFile(backend.partSize * 3, 'BIG.MP4') },
+        { file: makeFile(backend.partSize, 'tiny.jpg') },
+      ],
+      { projectId: 'p1' },
+    );
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 15_000, 'all done');
+
+    const seq = backend.putsReceived.map((p) => p.uploadId);
+    // srv-1 = HUGE, srv-2 = BIG, srv-3 = tiny (registration order).
+    // tiny goes up before HUGE ever starts; BIG finishes entirely before HUGE.
+    expect(seq.indexOf('srv-3')).toBeLessThan(seq.indexOf('srv-1'));
+    expect(seq.lastIndexOf('srv-2')).toBeLessThan(seq.indexOf('srv-1'));
+  });
+
   it('single mode: strictly one file at a time', async () => {
     const backend = new MockBackend();
     const origPut = backend.transport.putPart.bind(backend.transport);

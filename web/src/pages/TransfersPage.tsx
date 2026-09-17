@@ -40,6 +40,9 @@ export default function TransfersPage() {
   }, []);
 
   const activeUploads = uploads.filter((u) => u.state !== 'done' && u.state !== 'aborted');
+  const resumableDownloads = downloads.filter(
+    (d) => d.state === 'paused' || d.state === 'waiting_network' || d.state === 'error',
+  ).length;
   const finishedUploads = uploads.filter((u) => u.state === 'done' || u.state === 'aborted');
 
   // The live transfer always sorts to the top — never buried under the queue.
@@ -134,7 +137,7 @@ export default function TransfersPage() {
             />
             <p className="mt-2 text-[12px] leading-relaxed text-zinc-600">
               {mode === 'smart'
-                ? 'One big file at a time (with parallel parts); small files fill the spare bandwidth alongside it.'
+                ? 'Smallest files first, one big file at a time (with parallel parts); small files fill the spare bandwidth alongside it.'
                 : 'Strictly one file at a time — all bandwidth to the file at the front of the queue.'}
             </p>
             <div className="mt-3 border-t border-white/[0.06] pt-3">
@@ -188,7 +191,24 @@ export default function TransfersPage() {
 
         {downloads.length > 0 && (
           <section>
-            <h2 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">Downloads</h2>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Downloads</h2>
+              {resumableDownloads > 0 && (
+                <button
+                  onClick={() =>
+                    void downloadManager.resumeAll().then((r) => {
+                      if (r.needsHandle > 0)
+                        setNotice(
+                          `Resumed ${r.resumed} — ${r.needsHandle} could not be reopened. Select the same files again and Download; progress on disk is kept.`,
+                        );
+                    })
+                  }
+                  className="text-[12px] font-semibold text-blue-400 transition-colors hover:text-blue-300"
+                >
+                  Resume all ({resumableDownloads})
+                </button>
+              )}
+            </div>
             <div className="space-y-2">
               {downloads.map((d) => (
                 <DownloadCard key={d.videoId} d={d} onNotice={setNotice} />

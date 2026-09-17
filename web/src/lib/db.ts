@@ -52,6 +52,8 @@ export interface LocalDownload {
   totalSize: number;
   bytesWritten: number;
   state: LocalDownloadState;
+  /** Batch target folder — lets Resume all reopen every file with one permission grant. */
+  dirHandle?: FileSystemDirectoryHandle;
   error?: string;
   fileHandle?: FileSystemFileHandle;
   createdAt: number;

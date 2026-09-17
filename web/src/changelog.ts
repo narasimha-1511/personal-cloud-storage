@@ -14,6 +14,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.12.0',
+    date: '2026-09-17',
+    title: 'Resume all downloads, smallest files first',
+    changes: [
+      'Downloads: after a refresh, one “Resume all” button restores the whole batch — a single permission tap on the folder, not one click per file',
+      'Smart upload mode now sends smallest files first, so quick wins land before the multi-GB monsters',
+    ],
+  },
+  {
     version: '2.11.0',
     date: '2026-09-15',
     title: 'Download a selection as one ZIP',

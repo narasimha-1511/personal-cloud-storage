@@ -86,7 +86,7 @@ export class DownloadManager {
     for (const v of videos) {
       const existing = this.cache.get(v.id);
       if (existing && existing.state !== 'done' && existing.fileHandle) {
-        await this.patch(v.id, { state: 'queued', error: undefined });
+        await this.patch(v.id, { state: 'queued', error: undefined, dirHandle: dir });
         continue;
       }
       const name = await this.uniqueName(dir, v.displayName);
@@ -98,6 +98,7 @@ export class DownloadManager {
         bytesWritten: 0,
         state: 'queued',
         fileHandle: handle,
+        dirHandle: dir,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -213,19 +214,64 @@ export class DownloadManager {
   async resume(videoId: string): Promise<'ok' | 'needs_handle'> {
     const d = this.cache.get(videoId);
     if (!d) return 'needs_handle';
-    if (!d.fileHandle) return 'needs_handle';
-    try {
-      let perm = await d.fileHandle.queryPermission({ mode: 'readwrite' });
-      if (perm !== 'granted') {
-        perm = await d.fileHandle.requestPermission({ mode: 'readwrite' });
-      }
-      if (perm !== 'granted') return 'needs_handle';
-    } catch {
-      return 'needs_handle';
-    }
-    await this.patch(videoId, { state: 'downloading', error: undefined });
+    const handle = await this.reopenHandle(d);
+    if (!handle) return 'needs_handle';
+    await this.patch(videoId, { fileHandle: handle, state: 'downloading', error: undefined });
     void this.run(videoId);
     return 'ok';
+  }
+
+  /**
+   * One-tap resume for everything interrupted (e.g. after a page refresh).
+   * Batch downloads remember their target directory, so a single permission
+   * grant on the folder reopens every file — no per-file clicking.
+   */
+  async resumeAll(): Promise<{ resumed: number; needsHandle: number }> {
+    const pending = [...this.cache.values()].filter(
+      (d) => d.state === 'paused' || d.state === 'waiting_network' || d.state === 'error' || d.state === 'queued',
+    );
+    let resumed = 0;
+    let needsHandle = 0;
+    for (const d of pending) {
+      const handle = await this.reopenHandle(d);
+      if (handle) {
+        await this.patch(d.videoId, { fileHandle: handle, state: 'queued', error: undefined });
+        resumed++;
+      } else {
+        needsHandle++;
+      }
+    }
+    if (resumed > 0) void this.processQueue();
+    return { resumed, needsHandle };
+  }
+
+  /** Directory first (its grant covers the whole batch), stored file handle as fallback. */
+  private async reopenHandle(d: LocalDownload): Promise<FileSystemFileHandle | null> {
+    if (d.dirHandle && (await this.ensurePermission(d.dirHandle))) {
+      try {
+        // create:true — if the partial file was deleted on disk the download
+        // simply restarts from zero, since the on-disk size is the truth.
+        return await d.dirHandle.getFileHandle(d.filename, { create: true });
+      } catch {
+        // fall through to the stored file handle
+      }
+    }
+    if (d.fileHandle && (await this.ensurePermission(d.fileHandle))) return d.fileHandle;
+    return null;
+  }
+
+  private async ensurePermission(h: FileSystemHandle): Promise<boolean> {
+    try {
+      const handle = h as unknown as {
+        queryPermission?: (o: { mode: string }) => Promise<PermissionState>;
+        requestPermission?: (o: { mode: string }) => Promise<PermissionState>;
+      };
+      let perm = (await handle.queryPermission?.({ mode: 'readwrite' })) ?? 'granted';
+      if (perm !== 'granted') perm = (await handle.requestPermission?.({ mode: 'readwrite' })) ?? 'denied';
+      return perm === 'granted';
+    } catch {
+      return false;
+    }
   }
 
   pause(videoId: string): void {

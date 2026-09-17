@@ -607,7 +607,11 @@ export class UploadManager {
           this.files.has(u.localId) &&
           !this.active.has(u.localId),
       )
-      .sort((a, b) => a.createdAt - b.createdAt);
+      // Smart mode drains smallest-first: quick wins land before the
+      // multi-GB files, and nothing small waits hours behind them.
+      .sort((a, b) =>
+        this.mode === 'smart' ? a.size - b.size || a.createdAt - b.createdAt : a.createdAt - b.createdAt,
+      );
     const maxFiles = this.mode === 'single' ? 1 : this.config.maxConcurrentFiles;
     // Only ONE multi-part (big) file transfers at a time: splitting bandwidth
     // between two 2 GB videos finishes neither early. Spare slots go to

@@ -17,11 +17,12 @@ class FakeFileHandle {
   async getFile(): Promise<File> {
     return new File([Uint8Array.from(this.committed)], this.name);
   }
+  perm: PermissionState = 'granted';
   async queryPermission(): Promise<PermissionState> {
-    return 'granted';
+    return this.perm;
   }
   async requestPermission(): Promise<PermissionState> {
-    return 'granted';
+    return this.perm;
   }
   async createWritable(opts?: { keepExistingData?: boolean }) {
     let buf = opts?.keepExistingData ? Uint8Array.from(this.committed) : new Uint8Array(0);
@@ -46,6 +47,32 @@ class FakeFileHandle {
       },
       async abort() {},
     };
+  }
+}
+
+/** In-memory directory handle: one permission grant covers all files in it. */
+class FakeDirectoryHandle {
+  kind = 'directory' as const;
+  name = 'downloads';
+  files = new Map<string, FakeFileHandle>();
+  permissionRequests = 0;
+  private granted = false;
+  async queryPermission(): Promise<PermissionState> {
+    return this.granted ? 'granted' : 'prompt';
+  }
+  async requestPermission(): Promise<PermissionState> {
+    this.permissionRequests++;
+    this.granted = true;
+    return 'granted';
+  }
+  async getFileHandle(name: string, opts?: { create?: boolean }): Promise<FileSystemFileHandle> {
+    let f = this.files.get(name);
+    if (!f) {
+      if (!opts?.create) throw new DOMException('not found', 'NotFoundError');
+      f = new FakeFileHandle(name);
+      this.files.set(name, f);
+    }
+    return f as unknown as FileSystemFileHandle;
   }
 }
 
@@ -190,6 +217,40 @@ describe('DownloadManager', () => {
     // The resume request continued from a byte offset, not from scratch.
     const resumeReq = requests[requestsAtPause]!;
     expect(resumeReq.range).toMatch(/^bytes=\d+-$/);
+  });
+
+  it('resumeAll restores a whole interrupted batch with ONE folder permission grant', async () => {
+    const source = makeSource(15_000);
+    const { fetchFn: realFetch } = makeServer(source);
+    let online = false;
+    const fetchFn = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (!online) throw new TypeError('offline');
+      return realFetch(url, init);
+    }) as typeof fetch;
+
+    const mgr = new DownloadManager(newDb(), { downloadUrl: async () => ({ url: 'mock://dl' }) }, fetchFn, FAST);
+    await mgr.init();
+    const dir = new FakeDirectoryHandle();
+    const videos = [1, 2, 3].map((i) => ({ id: `vid-${i}`, displayName: `V_${i}.MP4`, size: source.byteLength }));
+    await mgr.startBatch(videos, dir as unknown as FileSystemDirectoryHandle);
+
+    // The network is down: the whole batch drains into waiting_network.
+    await waitFor(() => mgr.snapshot().every((d) => d.state === 'waiting_network'), 10_000, 'batch interrupted');
+
+    // Simulate the post-refresh state: individual file-handle permissions are
+    // gone, only the folder can be re-granted (what Chrome actually does).
+    for (const f of dir.files.values()) f.perm = 'prompt';
+    online = true;
+
+    const result = await mgr.resumeAll();
+    expect(result).toEqual({ resumed: 3, needsHandle: 0 });
+    await waitFor(() => mgr.snapshot().every((d) => d.state === 'done'), 10_000, 'batch done');
+
+    // One tap on the folder, not one per file.
+    expect(dir.permissionRequests).toBe(1);
+    for (const f of dir.files.values()) {
+      expect(await fileBytes(f)).toEqual(source);
+    }
   });
 
   it('exhausted retries end in waiting_network with progress intact', async () => {
