@@ -14,6 +14,14 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.14.1',
+    date: '2026-09-17',
+    title: 'Clearer sync message',
+    changes: [
+      '\u201cSync from other devices\u201d now explains itself when there is nothing to pull: it belongs on the device you are moving TO, not the one already uploading',
+    ],
+  },
+  {
     version: '2.14.0',
     date: '2026-09-17',
     title: 'Move an upload queue between devices',

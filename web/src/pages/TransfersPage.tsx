@@ -183,8 +183,8 @@ export default function TransfersPage() {
                         r.added > 0
                           ? `Found ${r.added} unfinished upload${r.added === 1 ? '' : 's'} from your other devices — use the banner above to re-select the files (a whole folder works) and they continue here.`
                           : r.found > 0
-                            ? 'All unfinished uploads are already on this device.'
-                            : 'No unfinished uploads anywhere — everything is done.',
+                            ? `This device already has all ${r.found} unfinished upload${r.found === 1 ? '' : 's'} — nothing to pull. Use this button on the OTHER device you want to continue from (pause here first).`
+                            : 'No unfinished uploads on the server — everything is done.',
                       ),
                     )
                     .catch((err) => setNotice(err instanceof Error ? err.message : 'Sync failed'))
