@@ -516,6 +516,30 @@ export class UploadManager {
     }
   }
 
+  /** Pauses everything that is or would be transferring — one tap before a device handover. */
+  async pauseAll(): Promise<number> {
+    let n = 0;
+    for (const u of [...this.uploadsCache.values()]) {
+      if (u.state === 'queued' || u.state === 'uploading' || u.state === 'waiting_network') {
+        await this.pause(u.localId);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /** Resumes every paused or errored upload that still has its file. */
+  async resumeAll(): Promise<number> {
+    let n = 0;
+    for (const u of [...this.uploadsCache.values()]) {
+      if (u.state === 'paused' || u.state === 'error') {
+        await this.resume(u.localId);
+        n++;
+      }
+    }
+    return n;
+  }
+
   async resume(localId: string): Promise<void> {
     const u = this.uploadsCache.get(localId);
     if (!u) return;

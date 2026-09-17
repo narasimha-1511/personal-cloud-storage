@@ -43,6 +43,10 @@ export default function TransfersPage() {
   }, []);
 
   const activeUploads = uploads.filter((u) => u.state !== 'done' && u.state !== 'aborted');
+  const pausableUploads = activeUploads.filter(
+    (u) => u.state === 'uploading' || u.state === 'queued' || u.state === 'waiting_network',
+  ).length;
+  const resumableUploads = activeUploads.filter((u) => u.state === 'paused' || u.state === 'error').length;
   const resumableDownloads = downloads.filter(
     (d) => d.state === 'paused' || d.state === 'waiting_network' || d.state === 'error',
   ).length;
@@ -173,6 +177,25 @@ export default function TransfersPage() {
 
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Uploads</h2>
+            <div className="flex items-center gap-4">
+            {pausableUploads > 0 && (
+              <button
+                onClick={() =>
+                  void uploadManager.pauseAll().then((n) => setNotice(`Paused ${n} upload${n === 1 ? '' : 's'} — progress is safe.`))
+                }
+                className="text-[12px] font-semibold text-zinc-400 transition-colors hover:text-zinc-100"
+              >
+                Pause all ({pausableUploads})
+              </button>
+            )}
+            {resumableUploads > 0 && (
+              <button
+                onClick={() => void uploadManager.resumeAll()}
+                className="text-[12px] font-semibold text-blue-400 transition-colors hover:text-blue-300"
+              >
+                Resume all ({resumableUploads})
+              </button>
+            )}
             {!isViewer && (
               <button
                 onClick={() =>
@@ -194,6 +217,7 @@ export default function TransfersPage() {
                 Sync from other devices
               </button>
             )}
+            </div>
           </div>
           <div className="space-y-2">
             <LazyList

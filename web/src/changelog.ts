@@ -14,6 +14,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '2.15.0',
+    date: '2026-09-17',
+    title: 'Pause all / Resume all uploads',
+    changes: [
+      'One button pauses the whole upload queue (and one resumes it) \u2014 no more clicking 70 files one by one',
+      'Made for the device handover: Pause all here, Sync on the other device, re-select from the SD card folder there',
+    ],
+  },
+  {
     version: '2.14.1',
     date: '2026-09-17',
     title: 'Clearer sync message',

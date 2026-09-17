@@ -648,3 +648,29 @@ describe('cross-device queue sync', () => {
     expect(new Set(partNums).size).toBe(6);
   });
 });
+
+describe('bulk pause and resume', () => {
+  it('pauseAll stops the whole queue; resumeAll brings it back', async () => {
+    const backend = new MockBackend();
+    const origPut = backend.transport.putPart.bind(backend.transport);
+    backend.transport = {
+      putPart: async (url, body, opts) => {
+        await new Promise((r) => setTimeout(r, 10));
+        return origPut(url, body, opts);
+      },
+    };
+    const { mgr } = makeManager(backend, newDbName());
+    await mgr.init();
+    await mgr.addFiles(
+      Array.from({ length: 5 }, (_, i) => ({ file: makeFile(backend.partSize * 2, `V_${i}.MP4`) })),
+      { projectId: 'p1' },
+    );
+    const paused = await mgr.pauseAll();
+    expect(paused).toBe(5);
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'paused'), 5000, 'all paused');
+
+    const resumed = await mgr.resumeAll();
+    expect(resumed).toBe(5);
+    await waitFor(() => mgr.snapshot().every((v) => v.state === 'done'), 15_000, 'all done after resume');
+  });
+});
